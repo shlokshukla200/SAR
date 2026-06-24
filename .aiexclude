@@ -1,0 +1,5 @@
+firebase-applet-config.json
+firebase-blueprint.json
+firestore.rules
+src/firebaseConfig.ts
+src/lib/firebase.ts
