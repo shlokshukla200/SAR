@@ -17,9 +17,10 @@ if (!connectionString) {
 }
 
 const { Pool } = pg;
+const isLocalhost = !connectionString || connectionString.includes("localhost") || connectionString.includes("127.0.0.1");
 const pool = new Pool({
   connectionString: connectionString,
-  ssl: connectionString?.includes("supabase.co") ? { rejectUnauthorized: false } : false
+  ssl: isLocalhost ? false : { rejectUnauthorized: false }
 });
 
 function mapStudent(row: any) {
@@ -176,6 +177,9 @@ function mapMessage(row: any) {
 
 // Database schema initialization
 async function initializeDatabase() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL environment variable is missing.");
+  }
   console.log("Checking and initializing PostgreSQL database schema...");
   try {
     const client = await pool.connect();
