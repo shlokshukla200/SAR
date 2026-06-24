@@ -390,10 +390,23 @@ app.use(express.json());
         databaseType: "PostgreSQL"
       });
     } catch (error: any) {
+      const dbUrl = process.env.DATABASE_URL || "";
+      let parsedHost = "";
+      try {
+        if (dbUrl) {
+          const match = dbUrl.match(/@([^:\/]+)/);
+          parsedHost = match ? match[1] : "not_found";
+        }
+      } catch (e) {}
       res.status(500).json({
         status: "error",
         error: error.message,
-        databaseConnected: false
+        databaseConnected: false,
+        debug: {
+          urlLength: dbUrl.length,
+          urlStartsWith: dbUrl ? dbUrl.substring(0, 15) : "empty",
+          parsedHost: parsedHost
+        }
       });
     }
   });
