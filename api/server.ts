@@ -944,4 +944,4 @@ app.use(express.json({ limit: '50mb' }));
     }
   });
 
-export default app;
+export default function handler(req: any, res: any) { return app(req, res); }
