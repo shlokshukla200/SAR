@@ -559,7 +559,7 @@ app.use(express.json({ limit: '50mb' }));
           s.id, s.username || null, s.password || null, s.isActivated || false, s.isRegistered || false, s.name, s.rollNo, s.batch, s.branch,
           s.photo || null, s.collegeId || null, s.section || null, s.year || null,
           JSON.stringify(s.preAnalysis || {}), JSON.stringify(s.postAnalysis || {}), JSON.stringify(s.workshopScores || []),
-          s.teacherId || null, JSON.stringify(s.personalDetails || {}), JSON.stringify(s.academicDetails || {}),
+          s.teacherId === 'None' ? null : (s.teacherId || null), JSON.stringify(s.personalDetails || {}), JSON.stringify(s.academicDetails || {}),
           JSON.stringify(s.allotedActivities || []), JSON.stringify(s.upcomingSessions || [])
         ]);
       }
@@ -618,7 +618,7 @@ app.use(express.json({ limit: '50mb' }));
           description = EXCLUDED.description,
           is_active = TRUE;
       `, [
-        config.batchId, config.teacherId || null, config.teacherName || null, config.isSetupComplete || false,
+        config.batchId, config.teacherId === 'None' ? null : (config.teacherId || null), config.teacherName || null, config.isSetupComplete || false,
         config.studentCount || 0, new Date().toISOString(), config.status || null, config.description || null
       ]);
 
@@ -719,7 +719,7 @@ app.use(express.json({ limit: '50mb' }));
           grading_mode = EXCLUDED.grading_mode,
           is_active = TRUE;
       `, [
-        task.id, task.type, task.title, task.teacherId || null, task.teacherName || null, task.batchId,
+        task.id, task.type, task.title, task.teacherId === 'None' ? null : (task.teacherId || null), task.teacherName || null, task.batchId,
         task.dueDate || null, task.description || "", task.status || "Active", task.createdAt || new Date().toISOString(),
         JSON.stringify(task.content || {}), task.randomize || false, task.timeLimit || null, task.gradingMode || 'Auto-Evaluated'
       ]);
@@ -801,7 +801,7 @@ app.use(express.json({ limit: '50mb' }));
         sub.id, sub.taskId, sub.studentId, sub.studentName, sub.batchId, sub.type,
         sub.submittedAt || new Date().toISOString(), sub.status || "Auto-Evaluated",
         sub.score !== undefined ? sub.score : null, sub.totalMarks || 0,
-        JSON.stringify(sub.answers || []), sub.attachmentUrl || null, sub.teacherId || null,
+        JSON.stringify(sub.answers || []), sub.attachmentUrl || null, sub.teacherId === 'None' ? null : (sub.teacherId || null),
         sub.submissionReason || 'Normal Submission'
       ]);
 
