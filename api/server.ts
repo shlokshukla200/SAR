@@ -783,20 +783,24 @@ app.use(express.json({ limit: '50mb' }));
   app.get("/api/submissions", async (req, res) => {
     try {
       const { taskId, studentId, teacherId } = req.query;
-      let queryText = "SELECT * FROM submissions WHERE is_active = TRUE";
+      const conditions = ["is_active = TRUE"];
       const params: any[] = [];
       let index = 1;
 
       if (taskId) {
-        queryText += ` AND task_id = $${index++}`;
+        conditions.push(`task_id = $${index++}`);
         params.push(taskId);
-      } else if (studentId) {
-        queryText += ` AND student_id = $${index++}`;
+      }
+      if (studentId) {
+        conditions.push(`student_id = $${index++}`);
         params.push(studentId);
-      } else if (teacherId) {
-        queryText += ` AND teacher_id = $${index++}`;
+      }
+      if (teacherId) {
+        conditions.push(`teacher_id = $${index++}`);
         params.push(teacherId);
       }
+
+      const queryText = "SELECT * FROM submissions WHERE " + conditions.join(" AND ") + " ORDER BY submitted_at DESC";
 
       const result = await pool.query(queryText, params);
       const mappedSubmissions = result.rows.map(mapSubmission);
