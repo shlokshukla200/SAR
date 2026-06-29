@@ -406,6 +406,7 @@ function AppContent() {
         setCurrentView('dashboard');
         setShowLoginGate(false);
         setUserRole(result.role);
+        localStorage.setItem('sar_token', result.token);
 
         if (result.role === 'admin' || result.role === 'staff') {
           setCurrentTeacher(result.user);
@@ -442,6 +443,7 @@ function AppContent() {
     setUserRole(null);
     setCurrentView('dashboard');
     setLoginStep('role');
+    localStorage.removeItem('sar_token');
     localStorage.removeItem('sar_isLoggedIn');
     localStorage.removeItem('sar_currentTeacher');
     localStorage.removeItem('sar_currentStudent');

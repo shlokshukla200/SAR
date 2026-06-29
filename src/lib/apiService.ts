@@ -1,6 +1,13 @@
 import { Student, BatchConfig, AuditLogEntry, Teacher, Task, Submission } from '../types';
 
-const apiFetch = async (url: string, options?: RequestInit) => {
+const apiFetch = async (url: string, options: RequestInit = {}) => {
+  const token = localStorage.getItem('sar_token');
+  const headers = new Headers(options.headers || {});
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  options.headers = headers;
+
   const res = await fetch(url, options);
   if (!res.ok) {
     const txt = await res.text();

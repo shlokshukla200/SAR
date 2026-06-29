@@ -414,33 +414,43 @@ app.use(express.json({ limit: '50mb' }));
         return res.status(400).json({ error: "Username and password are required" });
       }
 
+      let user: any = null;
+      let matchedRole: string = '';
+
       if (isAdminLogin || role === 'admin' || role === 'staff') {
         const result = await pool.query("SELECT * FROM teachers WHERE username = $1 AND is_active = TRUE", [username]);
         if (result.rows.length > 0 && result.rows[0].password === password) {
           const row = result.rows[0];
-          let userRole = row.role.toLowerCase();
-          if (userRole === 'teacher') userRole = 'staff';
-          return res.json({ success: true, role: userRole, user: mapTeacher(row) });
+          matchedRole = row.role.toLowerCase();
+          if (matchedRole === 'teacher') matchedRole = 'staff';
+          user = mapTeacher(row);
+        } else {
+          return res.status(401).json({ error: "Invalid credentials" });
         }
-        return res.status(401).json({ error: "Invalid credentials" });
+      } else {
+        // Not admin login, check teachers first
+        const teacherResult = await pool.query("SELECT * FROM teachers WHERE username = $1 AND is_active = TRUE", [username]);
+        if (teacherResult.rows.length > 0 && teacherResult.rows[0].password === password) {
+          const row = teacherResult.rows[0];
+          matchedRole = row.role.toLowerCase();
+          if (matchedRole === 'teacher') matchedRole = 'staff';
+          user = mapTeacher(row);
+        } else {
+          // Then check students
+          const studentResult = await pool.query(
+            "SELECT * FROM students WHERE (username = $1 OR roll_no = $1) AND is_activated = TRUE AND is_registered = TRUE AND is_active = TRUE", 
+            [username]
+          );
+          if (studentResult.rows.length > 0 && studentResult.rows[0].password === password) {
+            matchedRole = 'student';
+            user = mapStudent(studentResult.rows[0]);
+          }
+        }
       }
 
-      // Not admin login, check teachers first
-      const teacherResult = await pool.query("SELECT * FROM teachers WHERE username = $1 AND is_active = TRUE", [username]);
-      if (teacherResult.rows.length > 0 && teacherResult.rows[0].password === password) {
-        const row = teacherResult.rows[0];
-        let userRole = row.role.toLowerCase();
-        if (userRole === 'teacher') userRole = 'staff';
-        return res.json({ success: true, role: userRole, user: mapTeacher(row) });
-      }
-
-      // Then check students
-      const studentResult = await pool.query(
-        "SELECT * FROM students WHERE (username = $1 OR roll_no = $1) AND is_activated = TRUE AND is_registered = TRUE AND is_active = TRUE", 
-        [username]
-      );
-      if (studentResult.rows.length > 0 && studentResult.rows[0].password === password) {
-        return res.json({ success: true, role: 'student', user: mapStudent(studentResult.rows[0]) });
+      if (user) {
+        const token = Buffer.from(JSON.stringify({ id: user.id, role: matchedRole, exp: Date.now() + 86400000 })).toString('base64');
+        return res.json({ success: true, role: matchedRole, user, token });
       }
 
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -469,17 +479,34 @@ app.use(express.json({ limit: '50mb' }));
         }
       } catch (e) {}
       res.status(500).json({
-        status: "error",
         error: error.message,
-        databaseConnected: false,
-        debug: {
-          urlLength: dbUrl.length,
-          urlStartsWith: dbUrl ? dbUrl.substring(0, 15) : "empty",
-          parsedHost: parsedHost
-        }
+        details: "Check database connection parameters",
+        parsedHost
       });
     }
   });
+
+  // Simple JWT-like Session Middleware
+  const verifyToken = (req: any, res: any, next: any) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: "Missing or invalid token" });
+    }
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = JSON.parse(Buffer.from(token, 'base64').toString('utf8'));
+      if (decoded.exp && decoded.exp < Date.now()) {
+        return res.status(401).json({ error: "Token expired" });
+      }
+      req.user = decoded;
+      next();
+    } catch (e) {
+      return res.status(401).json({ error: "Invalid token format" });
+    }
+  };
+
+  app.use(verifyToken);
+
 
   // Students endpoint: save (create or update) students
   app.post("/api/students", async (req, res) => {
