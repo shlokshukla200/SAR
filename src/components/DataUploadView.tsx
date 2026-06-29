@@ -27,7 +27,7 @@ import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Type } from "@google/genai";
-import { databaseService } from '../lib/databaseService';
+import { apiService } from '../lib/apiService';
 import { Student, Teacher, BatchConfig } from '../types';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -47,7 +47,7 @@ import {
   SelectValue 
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { databaseService } from '../lib/databaseService';
+import { apiService } from '../lib/apiService';
 
 interface DataUploadViewProps {
   onDataExtracted: (students: Student[]) => void;
@@ -181,7 +181,7 @@ export function DataUploadView({ onDataExtracted, teachers, defaultBatch }: Data
 
       setProgress(40);
 
-      const response = await databaseService.generateAIContent({
+      const response = await apiService.generateAIContent({
         model: "gemini-3-flash-preview",
         contents: { parts },
         config: {
@@ -287,7 +287,7 @@ export function DataUploadView({ onDataExtracted, teachers, defaultBatch }: Data
       }));
 
       // Cloud Sync
-      await databaseService.saveStudents(studentsToSave);
+      await apiService.saveStudents(studentsToSave);
       
       const batchConfig: BatchConfig = {
         batchId: selectedBatch,
@@ -298,9 +298,9 @@ export function DataUploadView({ onDataExtracted, teachers, defaultBatch }: Data
         updatedAt: new Date().toISOString()
       };
       
-      await databaseService.saveBatchConfig(batchConfig);
+      await apiService.saveBatchConfig(batchConfig);
       
-      await databaseService.addAuditLog({
+      await apiService.addAuditLog({
         action: `Admin finalized Batch ${selectedBatch} with ${studentsToSave.length} students assigned to Prof. ${teacher.name}.`,
         performedBy: 'SKIT Admin',
         timestamp: new Date().toISOString()

@@ -149,7 +149,7 @@ import {
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { aiAcademicService } from './lib/aiService';
-import { databaseService } from './lib/databaseService';
+import { apiService } from './lib/apiService';
 import InboxView from './components/InboxView';
 import { Message } from './types';
 
@@ -306,7 +306,7 @@ function AppContent() {
       if (!userId) return;
 
       const pollLocalMessages = async () => {
-        const msgs = await databaseService.getMessagesForUser(userId, userRole || 'student', currentStudent?.batch);
+        const msgs = await apiService.getMessagesForUser(userId, userRole || 'student', currentStudent?.batch);
         // Find most recent unread where user is a recipient
         const unread = msgs.find(msg => {
           if (msg.senderId === userId) return false;
@@ -323,10 +323,10 @@ function AppContent() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const dbStudents = await databaseService.getAllStudents();
-      const dbLogs = await databaseService.getAuditLogs();
-      const dbTeachers = await databaseService.getAllTeachers();
-      const dbBatches = await databaseService.getAllBatches();
+      const dbStudents = await apiService.getAllStudents();
+      const dbLogs = await apiService.getAuditLogs();
+      const dbTeachers = await apiService.getAllTeachers();
+      const dbBatches = await apiService.getAllBatches();
       
       setStudents(dbStudents);
       setAuditLogs(dbLogs);
@@ -380,7 +380,7 @@ function AppContent() {
   useEffect(() => {
     if (userRole === 'student' && currentStudent) {
       const pollLocalTasks = async () => {
-        const tasks = await databaseService.getTasksByBatch(currentStudent.batch);
+        const tasks = await apiService.getTasksByBatch(currentStudent.batch);
         const activeTasks = tasks.filter(t => t.status === 'Active');
         setStudentTasks(activeTasks);
       };
@@ -399,7 +399,7 @@ function AppContent() {
     }
 
     try {
-      const result = await databaseService.login({ username, password, isAdminLogin });
+      const result = await apiService.login({ username, password, isAdminLogin });
 
       if (result.success) {
         setIsLoggedIn(true);
@@ -722,7 +722,7 @@ function AppContent() {
                 onBack={() => setLoginStep('form')}
                 onActivate={async (updatedStudent) => {
                   try {
-                    await databaseService.saveStudents([updatedStudent]);
+                    await apiService.saveStudents([updatedStudent]);
                     setStudents(prev => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
                     setCurrentStudent(updatedStudent);
                     localStorage.setItem('sar_currentStudent', JSON.stringify(updatedStudent));
@@ -773,7 +773,7 @@ function AppContent() {
           onLogout={handleLogout}
           onComplete={async (updated) => {
             try {
-              await databaseService.saveStudents([updated]);
+              await apiService.saveStudents([updated]);
               setStudents(prev => prev.map(s => s.id === updated.id ? updated : s));
               setCurrentStudent(updated);
               localStorage.setItem('sar_currentStudent', JSON.stringify(updated));
@@ -1368,7 +1368,7 @@ function TeacherProfileView({
   const handleSave = async () => {
     try {
       const updatedTeacher = { ...teacher, ...editedData };
-      await databaseService.saveTeacher(updatedTeacher);
+      await apiService.saveTeacher(updatedTeacher);
       onUpdate(updatedTeacher);
       setIsEditing(false);
       toast.success("Profile updated successfully!");
@@ -2700,7 +2700,7 @@ function TaskPlayer({ task, student, onBack }: { task: Task, student: Student, o
     };
 
     try {
-      await databaseService.saveSubmission(submission);
+      await apiService.saveSubmission(submission);
       setSubmitted(true);
       toast.success('Mock test submitted for manual grading');
     } catch (err) {
@@ -2777,7 +2777,7 @@ function TaskPlayer({ task, student, onBack }: { task: Task, student: Student, o
     };
 
     try {
-      await databaseService.saveSubmission(submission);
+      await apiService.saveSubmission(submission);
       setSubmitted(true);
       if (isManual) {
         toast.success('Assignment submitted for manual grading');
@@ -3006,8 +3006,8 @@ function StudentActivitiesView({
     const fetchData = async () => {
       try {
         const [tList, sList] = await Promise.all([
-          databaseService.getTasksByBatch(student.batch),
-          databaseService.getSubmissionsByStudent(student.id)
+          apiService.getTasksByBatch(student.batch),
+          apiService.getSubmissionsByStudent(student.id)
         ]);
         setTasks(tList);
         setSubmissions(sList);
@@ -3431,7 +3431,7 @@ function AdminDashboardView({
       Task: Provide a concise, high-impact managerial insight and one specific recommendation for the college administration based on this data.
       Format: Return a professional administrative insight and a specific recommendation. Avoid generic conversational prefixes like "Here is your insight". Return direct observations and instructions.`;
 
-      const result = await databaseService.generateAIContent({
+      const result = await apiService.generateAIContent({
         model,
         contents: prompt,
         config: { temperature: 0.7 }
@@ -3685,7 +3685,7 @@ function BatchControlView({
     };
     
     try {
-      await databaseService.saveBatchConfig(newBatch);
+      await apiService.saveBatchConfig(newBatch);
       setBatchesList(prev => [...prev, newBatch]);
       setAuditLogs(prev => [
         ...prev,
@@ -3726,8 +3726,8 @@ function BatchControlView({
     
     try {
       const targetBatch = updatedBatches.find(b => b.batchId === batchId)!;
-      await databaseService.saveBatchConfig(targetBatch);
-      await databaseService.saveTeacher(updatedTeacher); // Persist teacher batch change
+      await apiService.saveBatchConfig(targetBatch);
+      await apiService.saveTeacher(updatedTeacher); // Persist teacher batch change
       
       setBatchesList(updatedBatches);
       setTeachers(updatedTeachers);
@@ -3760,7 +3760,7 @@ function BatchControlView({
     if (!isConfirmed) return;
     
     try {
-      await databaseService.deleteBatch(batchId);
+      await apiService.deleteBatch(batchId);
       setBatchesList(prev => prev.filter(b => b.batchId !== batchId));
       setAuditLogs(prev => [
         ...prev,
@@ -3957,7 +3957,7 @@ function FacultyManagementView({
     };
 
     try {
-      await databaseService.saveTeacher(newT);
+      await apiService.saveTeacher(newT);
       setTeachers(prev => [...prev, newT]);
       setAuditLogs(prev => [
         ...prev,
@@ -3986,7 +3986,7 @@ function FacultyManagementView({
     if (!isConfirmed) return;
     
     try {
-      await databaseService.deleteTeacher(id);
+      await apiService.deleteTeacher(id);
       setTeachers(prev => prev.filter(x => x.id !== id));
       setAuditLogs(prev => [
         ...prev,
@@ -4179,7 +4179,7 @@ function AssignTasksView({
     if (teacher) {
       const fetchTasks = async () => {
         try {
-          const tasks = await databaseService.getTasksByBatch(teacher.batch);
+          const tasks = await apiService.getTasksByBatch(teacher.batch);
           setExistingTasks(tasks);
         } catch (err) {
           console.error("Error fetching tasks:", err);
@@ -4220,7 +4220,7 @@ function AssignTasksView({
 
     setGenerating(true);
     try {
-      await databaseService.saveTask(taskData);
+      await apiService.saveTask(taskData);
       setExistingTasks([taskData, ...existingTasks]);
       setShowCreateModal(false);
       resetGenState();
@@ -4289,7 +4289,7 @@ function AssignTasksView({
 
     try {
       // Backend API removal
-      await databaseService.deleteTask(taskId);
+      await apiService.deleteTask(taskId);
       console.log('Delete Success');
       toast.success("Activity deleted successfully");
     } catch (err: any) {
@@ -4310,7 +4310,7 @@ function AssignTasksView({
     const updatedTask = { ...task, status: newStatus as any };
     
     try {
-      await databaseService.saveTask(updatedTask);
+      await apiService.saveTask(updatedTask);
       setExistingTasks(prev => prev.map(t => t.id === task.id ? updatedTask : t));
       toast.success(`Activity ${newStatus === 'Closed' ? 'Closed' : 'Re-opened'}`);
     } catch (err) {
@@ -5806,7 +5806,7 @@ function SubmissionGradingDialog({
   const handleRetest = async () => {
     setIsRetesting(true);
     try {
-      await databaseService.deleteSubmission(sub.id);
+      await apiService.deleteSubmission(sub.id);
       toast.success("Retest assigned! Student submission has been reset.");
       if (onDelete) {
         onDelete(sub.id);
@@ -6110,9 +6110,8 @@ function MarksEntryView({
   useEffect(() => {
     const fetchTasks = async () => {
       try {
-        const res = await fetch('/api/tasks');
-        const data = await res.json();
-        setTasks(data.tasks || []);
+        const fetchedTasks = await apiService.getTasksByBatch(teacher.batch);
+        setTasks(fetchedTasks || []);
       } catch (err) {
         console.error("Error fetching tasks for grading:", err);
       }
@@ -6125,7 +6124,7 @@ function MarksEntryView({
       // Find the task to determine the submission filter type
       const findTaskType = async () => {
         try {
-          const tasks = await databaseService.getTasksByBatch(teacher.batch);
+          const tasks = await apiService.getTasksByBatch(teacher.batch);
           const task = tasks.find(t => t.id === taskIdFilter);
           if (task) {
             if (task.type === 'Conduct Mock Test') setSubmissionFilter('MockTest');
@@ -6149,7 +6148,7 @@ function MarksEntryView({
         setLoading(true);
         try {
           // Filter by teacher creator
-          const subs = await databaseService.getSubmissionsByTeacher(teacher.id);
+          const subs = await apiService.getSubmissionsByTeacher(teacher.id);
           setSubmissions(subs);
         } catch (err) {
           console.error(err);
@@ -6163,7 +6162,7 @@ function MarksEntryView({
 
   const handleManualGrade = async (subId: string, score: number) => {
     try {
-      await databaseService.gradeSubmission(subId, score);
+      await apiService.gradeSubmission(subId, score);
       setSubmissions(prev => prev.map(s => s.id === subId ? { ...s, score, status: 'Graded' } : s));
       toast.success('Grade updated successfully');
     } catch (err) {

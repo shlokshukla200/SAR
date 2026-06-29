@@ -9,7 +9,7 @@ const apiFetch = async (url: string, options?: RequestInit) => {
   return res.json();
 };
 
-export const databaseService = {
+export const apiService = {
   async login(credentials: { username: string; password: string; isAdminLogin?: boolean }) {
     const res = await apiFetch('/api/login', {
       method: 'POST',

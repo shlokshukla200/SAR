@@ -5,7 +5,7 @@
 
 import { Type } from "@google/genai";
 import { AssignmentContent, MockTestBlueprint, MockTestContent, Question, QuestionType } from "../types";
-import { databaseService } from "./databaseService";
+import { apiService } from "./apiService";
 
 export const aiAcademicService = {
   async generateQuestions(
@@ -59,7 +59,7 @@ export const aiAcademicService = {
       itemRequired.push("sampleAnswer");
     }
 
-    const response = await databaseService.generateAIContent({
+    const response = await apiService.generateAIContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
