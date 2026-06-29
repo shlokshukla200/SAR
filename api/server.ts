@@ -187,9 +187,16 @@ async function initializeDatabase() {
   try {
     const client = await pool.connect();
     try {
+      let isInitialized = false;
+      try {
+        await client.query("SELECT 1 FROM teachers LIMIT 1;");
+        isInitialized = true;
+      } catch (e) {}
+
       await client.query("BEGIN;");
 
-      // 1. Teachers table
+      if (!isInitialized) {
+        // 1. Teachers table
       await client.query(`
         CREATE TABLE IF NOT EXISTS teachers (
           id TEXT PRIMARY KEY,
@@ -337,9 +344,11 @@ async function initializeDatabase() {
       await client.query("CREATE INDEX IF NOT EXISTS idx_students_username ON students(username);");
       await client.query("CREATE INDEX IF NOT EXISTS idx_teachers_username ON teachers(username);");
       await client.query("CREATE INDEX IF NOT EXISTS idx_students_batch ON students(batch);");
-      await client.query("CREATE INDEX IF NOT EXISTS idx_tasks_batch_id ON tasks(batch_id);");
-      await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_task_id ON submissions(task_id);");
-      await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_student_id ON submissions(student_id);");
+      if (!isInitialized) {
+        await client.query("CREATE INDEX IF NOT EXISTS idx_tasks_batch_id ON tasks(batch_id);");
+        await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_task_id ON submissions(task_id);");
+        await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_student_id ON submissions(student_id);");
+      }
 
       // Seed the default system administrator if it does not exist
       const adminPassword = process.env.ADMIN_PASSWORD || 'password@admin';
@@ -365,17 +374,11 @@ async function initializeDatabase() {
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
-let dbInitializationPromise: Promise<void> | null = null;
-function ensureDbInitialized() {
-  if (!dbInitializationPromise) {
-    dbInitializationPromise = initializeDatabase();
-  }
-  return dbInitializationPromise;
-}
+const dbReady = initializeDatabase().catch(err => console.error('DB init failed:', err));
 
 app.use(async (req, res, next) => {
   try {
-    await ensureDbInitialized();
+    await dbReady;
     next();
   } catch (error: any) {
     console.error("Database initialization failed:", error);
