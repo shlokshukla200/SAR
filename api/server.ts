@@ -25,6 +25,10 @@ const pool = new Pool({
   max: 1
 });
 
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle PostgreSQL client', err);
+});
+
 function mapStudent(row: any) {
   if (!row) return null;
   return {
@@ -344,13 +348,12 @@ async function initializeDatabase() {
       await client.query("CREATE INDEX IF NOT EXISTS idx_students_username ON students(username);");
       await client.query("CREATE INDEX IF NOT EXISTS idx_teachers_username ON teachers(username);");
       await client.query("CREATE INDEX IF NOT EXISTS idx_students_batch ON students(batch);");
-      if (!isInitialized) {
-        await client.query("CREATE INDEX IF NOT EXISTS idx_tasks_batch_id ON tasks(batch_id);");
-        await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_task_id ON submissions(task_id);");
-        await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_student_id ON submissions(student_id);");
-      }
+      await client.query("CREATE INDEX IF NOT EXISTS idx_tasks_batch_id ON tasks(batch_id);");
+      await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_task_id ON submissions(task_id);");
+      await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_student_id ON submissions(student_id);");
+    }
 
-      // Seed the default system administrator if it does not exist
+    // Seed the default system administrator if it does not exist
       const adminPassword = process.env.ADMIN_PASSWORD || 'password@admin';
       await client.query(`
         INSERT INTO teachers (id, employee_id, username, password, name, role, department, contact_no, email_id, batch, assigned_batches, performance_details)
