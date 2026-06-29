@@ -180,6 +180,9 @@ async function initializeDatabase() {
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL environment variable is missing.");
   }
+  if (!process.env.ADMIN_PASSWORD) {
+    console.warn("WARNING: ADMIN_PASSWORD environment variable is missing! The admin account might be locked out. Please configure it in Vercel.");
+  }
   console.log("Checking and initializing PostgreSQL database schema...");
   try {
     const client = await pool.connect();
