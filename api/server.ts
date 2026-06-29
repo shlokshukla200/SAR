@@ -17,10 +17,12 @@ if (!connectionString) {
 }
 
 const { Pool } = pg;
-const isLocalhost = !connectionString || connectionString.includes("localhost") || connectionString.includes("127.0.0.1");
 const pool = new Pool({
   connectionString: connectionString,
-  ssl: isLocalhost ? false : { rejectUnauthorized: false }
+  ssl: connectionString ? { rejectUnauthorized: false } : false,
+  connectionTimeoutMillis: 10000,
+  idleTimeoutMillis: 30000,
+  max: 1
 });
 
 function mapStudent(row: any) {
@@ -404,33 +406,41 @@ app.use(express.json({ limit: '50mb' }));
   // Secure Login endpoint
   app.post("/api/login", async (req, res) => {
     try {
-      const { username, password, isAdminLogin } = req.body;
+      const { username, password, isAdminLogin, role } = req.body;
       if (!username || !password) {
         return res.status(400).json({ error: "Username and password are required" });
       }
 
-      // Check Admin
-      if (isAdminLogin) {
-        const result = await pool.query("SELECT * FROM teachers WHERE username = $1 AND password = $2 AND role = 'Admin' AND is_active = TRUE", [username, password]);
-        if (result.rows.length > 0) {
-          return res.json({ success: true, role: 'admin', user: mapTeacher(result.rows[0]) });
+      if (isAdminLogin || role === 'admin' || role === 'staff') {
+        const result = await pool.query("SELECT * FROM teachers WHERE username = $1 AND is_active = TRUE", [username]);
+        if (result.rows.length > 0 && result.rows[0].password === password) {
+          const row = result.rows[0];
+          let userRole = row.role.toLowerCase();
+          if (userRole === 'teacher') userRole = 'staff';
+          return res.json({ success: true, role: userRole, user: mapTeacher(row) });
         }
-        return res.status(401).json({ error: "Invalid Admin Credentials" });
+        return res.status(401).json({ error: "Invalid credentials" });
       }
 
-      // Check Teacher
-      const teacherResult = await pool.query("SELECT * FROM teachers WHERE username = $1 AND password = $2 AND role = 'Teacher' AND is_active = TRUE", [username, password]);
-      if (teacherResult.rows.length > 0) {
-        return res.json({ success: true, role: 'staff', user: mapTeacher(teacherResult.rows[0]) });
+      // Not admin login, check teachers first
+      const teacherResult = await pool.query("SELECT * FROM teachers WHERE username = $1 AND is_active = TRUE", [username]);
+      if (teacherResult.rows.length > 0 && teacherResult.rows[0].password === password) {
+        const row = teacherResult.rows[0];
+        let userRole = row.role.toLowerCase();
+        if (userRole === 'teacher') userRole = 'staff';
+        return res.json({ success: true, role: userRole, user: mapTeacher(row) });
       }
 
-      // Check Student (using username or roll_no)
-      const studentResult = await pool.query("SELECT * FROM students WHERE (username = $1 OR roll_no = $1) AND password = $2 AND is_active = TRUE", [username, password]);
-      if (studentResult.rows.length > 0) {
+      // Then check students
+      const studentResult = await pool.query(
+        "SELECT * FROM students WHERE (username = $1 OR roll_no = $1) AND is_activated = TRUE AND is_registered = TRUE AND is_active = TRUE", 
+        [username]
+      );
+      if (studentResult.rows.length > 0 && studentResult.rows[0].password === password) {
         return res.json({ success: true, role: 'student', user: mapStudent(studentResult.rows[0]) });
       }
 
-      return res.status(401).json({ error: "Invalid Credentials" });
+      return res.status(401).json({ error: 'Invalid credentials' });
     } catch (error: any) {
       console.error("Login API Error:", error);
       res.status(500).json({ error: "Internal server error during login" });
