@@ -3,6 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import pg from "pg";
+import { GoogleGenAI } from "@google/genai";
 
 dotenv.config();
 
@@ -27,7 +28,6 @@ function mapStudent(row: any) {
   return {
     id: row.id,
     username: row.username || null,
-    password: row.password || null,
     isActivated: !!row.is_activated,
     isRegistered: !!row.is_registered,
     name: row.name,
@@ -89,7 +89,6 @@ function mapTeacher(row: any) {
     id: row.id,
     employeeId: row.employee_id,
     username: row.username,
-    password: row.password,
     name: row.name,
     role: row.role,
     department: row.department,
@@ -338,11 +337,12 @@ async function initializeDatabase() {
       await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_student_id ON submissions(student_id);");
 
       // Seed the default system administrator if it does not exist
+      const adminPassword = process.env.ADMIN_PASSWORD || 'password@admin';
       await client.query(`
         INSERT INTO teachers (id, employee_id, username, password, name, role, department, contact_no, email_id, batch, assigned_batches, performance_details)
-        VALUES ('admin', 'ADM-001', 'admin', 'password@admin', 'Admin', 'Admin', '', '', '', 'All', '[]'::jsonb, '{}'::jsonb)
+        VALUES ('admin', 'ADM-001', 'admin', $1, 'Admin', 'Admin', '', '', '', 'All', '[]'::jsonb, '{}'::jsonb)
         ON CONFLICT (username) DO NOTHING;
-      `);
+      `, [adminPassword]);
 
       await client.query("COMMIT;");
       console.log("Database tables initialized successfully and admin account seeded!");
@@ -378,7 +378,64 @@ app.use(async (req, res, next) => {
   }
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+
+  // AI Proxy endpoint
+  app.post("/api/ai/generate", async (req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "GEMINI_API_KEY environment variable is missing on the server." });
+      }
+      const ai = new GoogleGenAI({ apiKey });
+      const { model, contents, config } = req.body;
+      const response = await ai.models.generateContent({
+        model: model || "gemini-3-flash-preview",
+        contents,
+        config
+      });
+      res.json({ text: response.text });
+    } catch (error: any) {
+      console.error("AI Generation Error:", error);
+      res.status(500).json({ error: error.message || "Failed to generate AI content" });
+    }
+  });
+
+  // Secure Login endpoint
+  app.post("/api/login", async (req, res) => {
+    try {
+      const { username, password, isAdminLogin } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password are required" });
+      }
+
+      // Check Admin
+      if (isAdminLogin) {
+        const result = await pool.query("SELECT * FROM teachers WHERE username = $1 AND password = $2 AND role = 'Admin' AND is_active = TRUE", [username, password]);
+        if (result.rows.length > 0) {
+          return res.json({ success: true, role: 'admin', user: mapTeacher(result.rows[0]) });
+        }
+        return res.status(401).json({ error: "Invalid Admin Credentials" });
+      }
+
+      // Check Teacher
+      const teacherResult = await pool.query("SELECT * FROM teachers WHERE username = $1 AND password = $2 AND role = 'Teacher' AND is_active = TRUE", [username, password]);
+      if (teacherResult.rows.length > 0) {
+        return res.json({ success: true, role: 'staff', user: mapTeacher(teacherResult.rows[0]) });
+      }
+
+      // Check Student (using username or roll_no)
+      const studentResult = await pool.query("SELECT * FROM students WHERE (username = $1 OR roll_no = $1) AND password = $2 AND is_active = TRUE", [username, password]);
+      if (studentResult.rows.length > 0) {
+        return res.json({ success: true, role: 'student', user: mapStudent(studentResult.rows[0]) });
+      }
+
+      return res.status(401).json({ error: "Invalid Credentials" });
+    } catch (error: any) {
+      console.error("Login API Error:", error);
+      res.status(500).json({ error: "Internal server error during login" });
+    }
+  });
 
   // Health check / database status check
   app.get("/api/health", async (req, res) => {

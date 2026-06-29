@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import { AssignmentContent, MockTestBlueprint, MockTestContent, Question, QuestionType } from "../types";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+import { databaseService } from "./databaseService";
 
 export const aiAcademicService = {
   async generateQuestions(
@@ -60,7 +59,7 @@ export const aiAcademicService = {
       itemRequired.push("sampleAnswer");
     }
 
-    const response = await ai.models.generateContent({
+    const response = await databaseService.generateAIContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
       config: {

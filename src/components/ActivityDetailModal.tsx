@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Task, Submission, MockTestContent, AssignmentContent, Student } from '../types';
-import { firebaseService } from '../lib/firebaseService';
+import { databaseService } from '../lib/databaseService';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -43,7 +43,7 @@ export function ActivityDetailModal({ task, onClose, onViewResponses, studentsIn
   useEffect(() => {
     const fetchSubmissions = async () => {
       try {
-        const data = await firebaseService.getSubmissionsByTask(task.id);
+        const data = await databaseService.getSubmissionsByTask(task.id);
         setSubmissions(data);
       } catch (err) {
         console.error("Error fetching detail submissions:", err);
@@ -300,7 +300,7 @@ export function ActivityDetailModal({ task, onClose, onViewResponses, studentsIn
                         if (task.gradingMode === 'Auto-Evaluated' || !task.gradingMode) return;
                         try {
                           const updated = { ...task, gradingMode: 'Auto-Evaluated' as const };
-                          await firebaseService.saveTask(updated);
+                          await databaseService.saveTask(updated);
                           if (onUpdateTask) onUpdateTask(updated);
                           toast.success("Grading mode updated to Auto-Evaluated");
                         } catch (err) {
@@ -318,7 +318,7 @@ export function ActivityDetailModal({ task, onClose, onViewResponses, studentsIn
                         if (task.gradingMode === 'Manual Grading') return;
                         try {
                           const updated = { ...task, gradingMode: 'Manual Grading' as const };
-                          await firebaseService.saveTask(updated);
+                          await databaseService.saveTask(updated);
                           if (onUpdateTask) onUpdateTask(updated);
                           toast.success("Grading mode updated to Manual Grading");
                         } catch (err) {

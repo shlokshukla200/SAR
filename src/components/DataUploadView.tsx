@@ -26,7 +26,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
+import { databaseService } from '../lib/databaseService';
 import { Student, Teacher, BatchConfig } from '../types';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -46,7 +47,7 @@ import {
   SelectValue 
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { firebaseService } from '../lib/firebaseService';
+import { databaseService } from '../lib/databaseService';
 
 interface DataUploadViewProps {
   onDataExtracted: (students: Student[]) => void;
@@ -123,7 +124,6 @@ export function DataUploadView({ onDataExtracted, teachers, defaultBatch }: Data
     setProgress(10);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       let parts: any[] = [];
 
       const prompt = `
@@ -181,7 +181,7 @@ export function DataUploadView({ onDataExtracted, teachers, defaultBatch }: Data
 
       setProgress(40);
 
-      const response = await ai.models.generateContent({
+      const response = await databaseService.generateAIContent({
         model: "gemini-3-flash-preview",
         contents: { parts },
         config: {
@@ -287,7 +287,7 @@ export function DataUploadView({ onDataExtracted, teachers, defaultBatch }: Data
       }));
 
       // Cloud Sync
-      await firebaseService.saveStudents(studentsToSave);
+      await databaseService.saveStudents(studentsToSave);
       
       const batchConfig: BatchConfig = {
         batchId: selectedBatch,
@@ -298,9 +298,9 @@ export function DataUploadView({ onDataExtracted, teachers, defaultBatch }: Data
         updatedAt: new Date().toISOString()
       };
       
-      await firebaseService.saveBatchConfig(batchConfig);
+      await databaseService.saveBatchConfig(batchConfig);
       
-      await firebaseService.addAuditLog({
+      await databaseService.addAuditLog({
         action: `Admin finalized Batch ${selectedBatch} with ${studentsToSave.length} students assigned to Prof. ${teacher.name}.`,
         performedBy: 'SKIT Admin',
         timestamp: new Date().toISOString()

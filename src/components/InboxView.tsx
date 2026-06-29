@@ -43,7 +43,7 @@ import {
   DialogFooter
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { firebaseService } from '@/lib/firebaseService';
+import { databaseService } from '@/lib/databaseService';
 import { Message, Student, Teacher, RecipientType, MessagePriority, MessageCategory } from '../types';
 import { cn } from '@/lib/utils';
 
@@ -65,7 +65,7 @@ export default function InboxView({ currentUser, userRole, students, teachers }:
   useEffect(() => {
     const pollMessages = async () => {
       try {
-        const msgs = await firebaseService.getMessagesForUser(currentUser.id, userRole || 'student', currentUser.batch);
+        const msgs = await databaseService.getMessagesForUser(currentUser.id, userRole || 'student', currentUser.batch);
         setMessages(msgs);
       } catch (err) {
         console.error("Error polling messages:", err);
@@ -116,7 +116,7 @@ export default function InboxView({ currentUser, userRole, students, teachers }:
     if (activeThread) {
       activeThread.messages.forEach(msg => {
         if (msg.senderId !== currentUser.id && !msg.readBy?.includes(currentUser.id)) {
-          firebaseService.markMessageAsRead(msg.id, currentUser.id);
+          databaseService.markMessageAsRead(msg.id, currentUser.id);
         }
       });
     }
@@ -305,7 +305,7 @@ export default function InboxView({ currentUser, userRole, students, teachers }:
       ? [originalMsg.senderId === currentUser.id ? originalMsg.recipientArray[0] : originalMsg.senderId]
       : originalMsg.recipientArray;
 
-    await firebaseService.sendMessage({
+    await databaseService.sendMessage({
       senderId: currentUser.id,
       senderName: currentUser.role === 'Admin' ? 'Admin' : currentUser.name,
       text: content,
@@ -389,7 +389,7 @@ function ComposeModal({ isOpen, onClose, currentUser, userRole, students, teache
         recipientArray = students.filter((s: Student) => s.batch === selectedBatch).map((s: Student) => s.id);
       }
 
-      await firebaseService.sendMessage({
+      await databaseService.sendMessage({
         senderId: currentUser.id,
         senderName: currentUser.role === 'Admin' ? 'Admin' : currentUser.name,
         text: content,

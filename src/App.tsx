@@ -59,10 +59,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 import { Toaster, toast } from 'sonner';
-
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 import { 
   Card, 
   CardContent, 
@@ -152,7 +149,7 @@ import {
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { aiAcademicService } from './lib/aiService';
-import { firebaseService } from './lib/firebaseService';
+import { databaseService } from './lib/databaseService';
 import InboxView from './components/InboxView';
 import { Message } from './types';
 
@@ -309,7 +306,7 @@ function AppContent() {
       if (!userId) return;
 
       const pollLocalMessages = async () => {
-        const msgs = await firebaseService.getMessagesForUser(userId, userRole || 'student', currentStudent?.batch);
+        const msgs = await databaseService.getMessagesForUser(userId, userRole || 'student', currentStudent?.batch);
         // Find most recent unread where user is a recipient
         const unread = msgs.find(msg => {
           if (msg.senderId === userId) return false;
@@ -326,10 +323,10 @@ function AppContent() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const dbStudents = await firebaseService.getAllStudents();
-      const dbLogs = await firebaseService.getAuditLogs();
-      const dbTeachers = await firebaseService.getAllTeachers();
-      const dbBatches = await firebaseService.getAllBatches();
+      const dbStudents = await databaseService.getAllStudents();
+      const dbLogs = await databaseService.getAuditLogs();
+      const dbTeachers = await databaseService.getAllTeachers();
+      const dbBatches = await databaseService.getAllBatches();
       
       setStudents(dbStudents);
       setAuditLogs(dbLogs);
@@ -383,7 +380,7 @@ function AppContent() {
   useEffect(() => {
     if (userRole === 'student' && currentStudent) {
       const pollLocalTasks = async () => {
-        const tasks = await firebaseService.getTasksByBatch(currentStudent.batch);
+        const tasks = await databaseService.getTasksByBatch(currentStudent.batch);
         const activeTasks = tasks.filter(t => t.status === 'Active');
         setStudentTasks(activeTasks);
       };
@@ -393,7 +390,7 @@ function AppContent() {
     }
   }, [userRole, currentStudent, currentView]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!username || !password) {
@@ -401,86 +398,40 @@ function AppContent() {
       return;
     }
 
-    if (loginStep === 'form' && !isAdminLogin && !username.startsWith('Skit') && !username.startsWith('SKIT') && username.match(/^[A-Z]\d{3}$/)) {
-      // Potentially a student login attempt in staff form? 
-      // Actually let's just use the form for both but track which role was selected.
-    }
+    try {
+      const result = await databaseService.login({ username, password, isAdminLogin });
 
-    // Role was determined by which FlipCard was clicked? 
-    // In current implementation, FlipCard for Student had "Coming Soon".
-    // I will change it to allow entering.
-
-    // Admin check
-    if (isAdminLogin) {
-      if (username === 'admin' && password === 'password@admin') {
-        const adminUser = teachers.find(t => t.id === 'admin')!;
+      if (result.success) {
         setIsLoggedIn(true);
-        setCurrentTeacher(adminUser);
-        setUserRole('admin');
-        setAdminSelectedBatch('All');
         setCurrentView('dashboard');
         setShowLoginGate(false);
-        if (rememberMe) {
-          localStorage.setItem('sar_isLoggedIn', 'true');
-          localStorage.setItem('sar_currentTeacher', JSON.stringify(adminUser));
-          localStorage.setItem('sar_userRole', 'admin');
+        setUserRole(result.role);
+
+        if (result.role === 'admin' || result.role === 'staff') {
+          setCurrentTeacher(result.user);
+          setAdminSelectedBatch('All');
+          if (rememberMe) {
+            localStorage.setItem('sar_isLoggedIn', 'true');
+            localStorage.setItem('sar_currentTeacher', JSON.stringify(result.user));
+            localStorage.setItem('sar_userRole', result.role);
+          }
+          toast.success(result.role === 'admin' ? `Welcome back, Admin!` : `Welcome back, Prof. ${result.user.name}!`);
+        } else if (result.role === 'student') {
+          setCurrentStudent(result.user);
+          if (rememberMe) {
+            localStorage.setItem('sar_isLoggedIn', 'true');
+            localStorage.setItem('sar_currentStudent', JSON.stringify(result.user));
+            localStorage.setItem('sar_userRole', 'student');
+          }
+          toast.success(`Welcome back, ${result.user.name}!`);
         }
-        toast.success(`Welcome back, Admin!`);
-        return;
+      }
+    } catch (error: any) {
+      if (error.message.includes('401')) {
+        toast.error('Invalid Credentials');
       } else {
-        toast.error('Invalid Admin Credentials');
-        return;
+        toast.error('Login failed: ' + error.message);
       }
-    }
-
-    // Teacher check
-    const teacher = teachers.find(t => 
-      t.username === username && 
-      t.password === password && 
-      t.role === 'Teacher'
-    );
-
-    if (teacher) {
-      setIsLoggedIn(true);
-      setCurrentTeacher(teacher);
-      setUserRole('staff');
-      setAdminSelectedBatch('All');
-      setCurrentView('dashboard');
-      setShowLoginGate(false);
-      if (rememberMe) {
-        localStorage.setItem('sar_isLoggedIn', 'true');
-        localStorage.setItem('sar_currentTeacher', JSON.stringify(teacher));
-        localStorage.setItem('sar_userRole', 'staff');
-      }
-      toast.success(`Welcome back, Prof. ${teacher.name}!`);
-      return;
-    }
-
-    // Student Login
-    const student = students.find(s => 
-      (s.username === username && s.password === password) || 
-      (s.rollNo === username && s.rollNo === password)
-    );
-    if (student) {
-      setIsLoggedIn(true);
-      setCurrentStudent(student);
-      setUserRole('student');
-      setCurrentView('dashboard');
-      setShowLoginGate(false);
-      if (rememberMe) {
-        localStorage.setItem('sar_isLoggedIn', 'true');
-        localStorage.setItem('sar_currentStudent', JSON.stringify(student));
-        localStorage.setItem('sar_userRole', 'student');
-      }
-      toast.success(`Welcome back, ${student.name}!`);
-      return;
-    }
-
-    const exists = teachers.find(t => t.username === username && t.password === password);
-    if (exists) {
-      toast.error(isAdminLogin ? 'This account is not an Admin account' : 'Please use Admin login for this account');
-    } else {
-      toast.error('Invalid Credentials');
     }
   };
 
@@ -771,7 +722,7 @@ function AppContent() {
                 onBack={() => setLoginStep('form')}
                 onActivate={async (updatedStudent) => {
                   try {
-                    await firebaseService.saveStudents([updatedStudent]);
+                    await databaseService.saveStudents([updatedStudent]);
                     setStudents(prev => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
                     setCurrentStudent(updatedStudent);
                     localStorage.setItem('sar_currentStudent', JSON.stringify(updatedStudent));
@@ -822,7 +773,7 @@ function AppContent() {
           onLogout={handleLogout}
           onComplete={async (updated) => {
             try {
-              await firebaseService.saveStudents([updated]);
+              await databaseService.saveStudents([updated]);
               setStudents(prev => prev.map(s => s.id === updated.id ? updated : s));
               setCurrentStudent(updated);
               localStorage.setItem('sar_currentStudent', JSON.stringify(updated));
@@ -1417,7 +1368,7 @@ function TeacherProfileView({
   const handleSave = async () => {
     try {
       const updatedTeacher = { ...teacher, ...editedData };
-      await firebaseService.saveTeacher(updatedTeacher);
+      await databaseService.saveTeacher(updatedTeacher);
       onUpdate(updatedTeacher);
       setIsEditing(false);
       toast.success("Profile updated successfully!");
@@ -2749,7 +2700,7 @@ function TaskPlayer({ task, student, onBack }: { task: Task, student: Student, o
     };
 
     try {
-      await firebaseService.saveSubmission(submission);
+      await databaseService.saveSubmission(submission);
       setSubmitted(true);
       toast.success('Mock test submitted for manual grading');
     } catch (err) {
@@ -2826,7 +2777,7 @@ function TaskPlayer({ task, student, onBack }: { task: Task, student: Student, o
     };
 
     try {
-      await firebaseService.saveSubmission(submission);
+      await databaseService.saveSubmission(submission);
       setSubmitted(true);
       if (isManual) {
         toast.success('Assignment submitted for manual grading');
@@ -3055,8 +3006,8 @@ function StudentActivitiesView({
     const fetchData = async () => {
       try {
         const [tList, sList] = await Promise.all([
-          firebaseService.getTasksByBatch(student.batch),
-          firebaseService.getSubmissionsByStudent(student.id)
+          databaseService.getTasksByBatch(student.batch),
+          databaseService.getSubmissionsByStudent(student.id)
         ]);
         setTasks(tList);
         setSubmissions(sList);
@@ -3480,7 +3431,7 @@ function AdminDashboardView({
       Task: Provide a concise, high-impact managerial insight and one specific recommendation for the college administration based on this data.
       Format: Return a professional administrative insight and a specific recommendation. Avoid generic conversational prefixes like "Here is your insight". Return direct observations and instructions.`;
 
-      const result = await genAI.models.generateContent({
+      const result = await databaseService.generateAIContent({
         model,
         contents: prompt,
         config: { temperature: 0.7 }
@@ -3734,7 +3685,7 @@ function BatchControlView({
     };
     
     try {
-      await firebaseService.saveBatchConfig(newBatch);
+      await databaseService.saveBatchConfig(newBatch);
       setBatchesList(prev => [...prev, newBatch]);
       setAuditLogs(prev => [
         ...prev,
@@ -3775,8 +3726,8 @@ function BatchControlView({
     
     try {
       const targetBatch = updatedBatches.find(b => b.batchId === batchId)!;
-      await firebaseService.saveBatchConfig(targetBatch);
-      await firebaseService.saveTeacher(updatedTeacher); // Persist teacher batch change
+      await databaseService.saveBatchConfig(targetBatch);
+      await databaseService.saveTeacher(updatedTeacher); // Persist teacher batch change
       
       setBatchesList(updatedBatches);
       setTeachers(updatedTeachers);
@@ -3809,7 +3760,7 @@ function BatchControlView({
     if (!isConfirmed) return;
     
     try {
-      await firebaseService.deleteBatch(batchId);
+      await databaseService.deleteBatch(batchId);
       setBatchesList(prev => prev.filter(b => b.batchId !== batchId));
       setAuditLogs(prev => [
         ...prev,
@@ -4006,7 +3957,7 @@ function FacultyManagementView({
     };
 
     try {
-      await firebaseService.saveTeacher(newT);
+      await databaseService.saveTeacher(newT);
       setTeachers(prev => [...prev, newT]);
       setAuditLogs(prev => [
         ...prev,
@@ -4035,7 +3986,7 @@ function FacultyManagementView({
     if (!isConfirmed) return;
     
     try {
-      await firebaseService.deleteTeacher(id);
+      await databaseService.deleteTeacher(id);
       setTeachers(prev => prev.filter(x => x.id !== id));
       setAuditLogs(prev => [
         ...prev,
@@ -4228,7 +4179,7 @@ function AssignTasksView({
     if (teacher) {
       const fetchTasks = async () => {
         try {
-          const tasks = await firebaseService.getTasksByBatch(teacher.batch);
+          const tasks = await databaseService.getTasksByBatch(teacher.batch);
           setExistingTasks(tasks);
         } catch (err) {
           console.error("Error fetching tasks:", err);
@@ -4269,7 +4220,7 @@ function AssignTasksView({
 
     setGenerating(true);
     try {
-      await firebaseService.saveTask(taskData);
+      await databaseService.saveTask(taskData);
       setExistingTasks([taskData, ...existingTasks]);
       setShowCreateModal(false);
       resetGenState();
@@ -4338,7 +4289,7 @@ function AssignTasksView({
 
     try {
       // Backend API removal
-      await firebaseService.deleteTask(taskId);
+      await databaseService.deleteTask(taskId);
       console.log('Delete Success');
       toast.success("Activity deleted successfully");
     } catch (err: any) {
@@ -4359,7 +4310,7 @@ function AssignTasksView({
     const updatedTask = { ...task, status: newStatus as any };
     
     try {
-      await firebaseService.saveTask(updatedTask);
+      await databaseService.saveTask(updatedTask);
       setExistingTasks(prev => prev.map(t => t.id === task.id ? updatedTask : t));
       toast.success(`Activity ${newStatus === 'Closed' ? 'Closed' : 'Re-opened'}`);
     } catch (err) {
@@ -5855,7 +5806,7 @@ function SubmissionGradingDialog({
   const handleRetest = async () => {
     setIsRetesting(true);
     try {
-      await firebaseService.deleteSubmission(sub.id);
+      await databaseService.deleteSubmission(sub.id);
       toast.success("Retest assigned! Student submission has been reset.");
       if (onDelete) {
         onDelete(sub.id);
@@ -6174,7 +6125,7 @@ function MarksEntryView({
       // Find the task to determine the submission filter type
       const findTaskType = async () => {
         try {
-          const tasks = await firebaseService.getTasksByBatch(teacher.batch);
+          const tasks = await databaseService.getTasksByBatch(teacher.batch);
           const task = tasks.find(t => t.id === taskIdFilter);
           if (task) {
             if (task.type === 'Conduct Mock Test') setSubmissionFilter('MockTest');
@@ -6198,7 +6149,7 @@ function MarksEntryView({
         setLoading(true);
         try {
           // Filter by teacher creator
-          const subs = await firebaseService.getSubmissionsByTeacher(teacher.id);
+          const subs = await databaseService.getSubmissionsByTeacher(teacher.id);
           setSubmissions(subs);
         } catch (err) {
           console.error(err);
@@ -6212,7 +6163,7 @@ function MarksEntryView({
 
   const handleManualGrade = async (subId: string, score: number) => {
     try {
-      await firebaseService.gradeSubmission(subId, score);
+      await databaseService.gradeSubmission(subId, score);
       setSubmissions(prev => prev.map(s => s.id === subId ? { ...s, score, status: 'Graded' } : s));
       toast.success('Grade updated successfully');
     } catch (err) {

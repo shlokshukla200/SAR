@@ -9,7 +9,25 @@ const apiFetch = async (url: string, options?: RequestInit) => {
   return res.json();
 };
 
-export const firebaseService = {
+export const databaseService = {
+  async login(credentials: { username: string; password: string; isAdminLogin?: boolean }) {
+    const res = await apiFetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials)
+    });
+    return res;
+  },
+  
+  async generateAIContent(payload: { model?: string, contents: any, config?: any }) {
+    const res = await apiFetch('/api/ai/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return res;
+  },
+
   // Batch Config
   async saveBatchConfig(config: BatchConfig) {
     await apiFetch('/api/batches', {
