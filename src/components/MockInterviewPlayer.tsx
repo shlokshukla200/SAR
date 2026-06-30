@@ -14,29 +14,84 @@ interface MockInterviewPlayerProps {
   onBack: () => void;
 }
 
-function AudioWaveform({ active }: { active: boolean }) {
-  const bars = Array.from({ length: 40 });
+function AudioWaveform({ mode, stream }: { mode: 'ai' | 'user' | 'standby', stream: MediaStream | null }) {
+  const barsCount = 40;
+  const [dataArray, setDataArray] = useState<Uint8Array>(new Uint8Array(barsCount));
+  const requestRef = useRef<number>();
+
+  useEffect(() => {
+    if (mode === 'user' && stream) {
+      try {
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 128;
+        const source = audioCtx.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        const data = new Uint8Array(analyser.frequencyBinCount);
+
+        const update = () => {
+          analyser.getByteFrequencyData(data);
+          const sliced = new Uint8Array(barsCount);
+          for (let i = 0; i < barsCount; i++) {
+             sliced[i] = data[i]; 
+          }
+          setDataArray(sliced);
+          requestRef.current = requestAnimationFrame(update);
+        };
+        
+        requestRef.current = requestAnimationFrame(update);
+
+        return () => {
+          if (requestRef.current) cancelAnimationFrame(requestRef.current);
+          source.disconnect();
+          analyser.disconnect();
+          if (audioCtx.state !== 'closed') audioCtx.close();
+        };
+      } catch (err) {
+        console.error("Audio API error:", err);
+      }
+    } else {
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      setDataArray(new Uint8Array(barsCount));
+    }
+  }, [mode, stream]);
+
   return (
     <div className="flex items-center justify-center gap-[3px] h-16">
-      {bars.map((_, i) => (
-        <motion.div
-          key={i}
-          className="w-[3px] rounded-full"
-          style={{
-            background: active
-              ? `linear-gradient(to top, #06b6d4, #3b82f6, #8b5cf6)`
-              : 'rgba(255,255,255,0.1)'
-          }}
-          animate={active ? { height: [6, (8 + (i * 7 + 13) % 48), 6] } : { height: 4 }}
-          transition={active ? {
-            duration: 0.4 + (i % 5) * 0.08,
-            repeat: Infinity,
-            repeatType: 'reverse',
-            delay: i * 0.025,
-            ease: 'easeInOut'
-          } : { duration: 0.3 }}
-        />
-      ))}
+      {Array.from({ length: barsCount }).map((_, i) => {
+        if (mode === 'ai') {
+          return (
+            <motion.div
+              key={i}
+              className="w-[3px] rounded-full"
+              style={{ background: `linear-gradient(to top, #06b6d4, #3b82f6, #8b5cf6)` }}
+              animate={{ height: [6, (8 + (i * 7 + 13) % 48), 6] }}
+              transition={{
+                duration: 0.4 + (i % 5) * 0.08, repeat: Infinity, repeatType: 'reverse', delay: i * 0.025, ease: 'easeInOut'
+              }}
+            />
+          );
+        } else if (mode === 'user') {
+          const val = dataArray[i] || 0;
+          const height = Math.max(4, (val / 255) * 56);
+          return (
+            <div
+              key={i}
+              className="w-[3px] rounded-full"
+              style={{
+                height: `${height}px`,
+                background: val > 5 ? `linear-gradient(to top, #06b6d4, #3b82f6, #8b5cf6)` : 'rgba(255,255,255,0.1)',
+                transition: 'height 0.05s ease'
+              }}
+            />
+          );
+        } else {
+          return (
+            <div key={i} className="w-[3px] h-1 rounded-full" style={{ background: 'rgba(255,255,255,0.1)' }} />
+          );
+        }
+      })}
     </div>
   );
 }
@@ -558,7 +613,7 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
 
       {/* Bottom: waveform + controls */}
       <div className="relative z-10 px-8 pb-6">
-        <AudioWaveform active={isAiSpeaking || isListening} />
+        <AudioWaveform mode={isAiSpeaking ? 'ai' : isListening ? 'user' : 'standby'} stream={streamRef.current} />
         <div className="flex items-center justify-center gap-4 mt-4">
           <button onClick={toggleMic} className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isMuted ? 'bg-rose-600/80 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
             {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
