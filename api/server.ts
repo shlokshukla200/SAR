@@ -103,7 +103,8 @@ function mapTeacher(row: any) {
     photo: row.photo,
     batch: row.batch,
     assignedBatches: row.assigned_batches,
-    performanceDetails: row.performance_details
+    performanceDetails: row.performance_details,
+    password: row.password
   };
 }
 

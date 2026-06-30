@@ -3853,9 +3853,12 @@ function FacultyManagementView({
               <div className="flex items-center gap-2 text-xs text-slate-500">
                 <Phone className="w-3 h-3" /> {t.contactNo}
               </div>
-              <div className="pt-3 border-t border-slate-50 flex justify-between items-center text-[10px] text-slate-400 font-bold">
-                <span>LOGIN: {t.username}</span>
-                <Badge variant="secondary" className="bg-indigo-50 text-indigo-700">{t.batch}</Badge>
+              <div className="pt-3 border-t border-slate-50 flex flex-col gap-1 text-[10px] text-slate-400 font-bold">
+                <div className="flex justify-between items-center">
+                  <span>LOGIN: {t.username}</span>
+                  <Badge variant="secondary" className="bg-indigo-50 text-indigo-700">{t.batch}</Badge>
+                </div>
+                {t.password && <span>PASSWORD: {t.password}</span>}
               </div>
             </CardContent>
           </Card>
