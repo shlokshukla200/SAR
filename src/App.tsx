@@ -152,6 +152,8 @@ import { aiAcademicService } from './lib/aiService';
 import { apiService } from './lib/apiService';
 import InboxView from './components/InboxView';
 import { Message } from './types';
+import MockInterviewPlayer from './components/MockInterviewPlayer';
+import { aiInterviewService } from './lib/aiService';
 
 type View = 'dashboard' | 'students' | 'marks' | 'reports' | 'student-detail' | 'upload' | 'teacher-profile' | 'student-portal-profile' | 'student-activities' | 'student-sessions' | 'student-results' | 'batch-control' | 'faculty-mgmt' | 'skill-config' | 'assign-tasks' | 'inbox';
 type LoginStep = 'role' | 'form' | 'activate';
@@ -2818,6 +2820,9 @@ function StudentActivitiesView({
   }, [student.batch, student.id]);
 
   if (activeTask) {
+    if (activeTask.type === 'Conduct Mock Interview') {
+      return <MockInterviewPlayer task={activeTask} student={student} onBack={() => setActiveTask(null)} />;
+    }
     return <TaskPlayer task={activeTask} student={student} onBack={() => setActiveTask(null)} />;
   }
 
@@ -2880,9 +2885,9 @@ function StudentActivitiesView({
                           <Button 
                             onClick={() => setActiveTask(task)}
                             size="sm" 
-                            className="rounded-full bg-indigo-600 hover:bg-indigo-700 h-9 px-4 font-bold"
+                            className={`rounded-full h-9 px-4 font-bold ${task.type === 'Conduct Mock Interview' ? 'bg-cyan-600 hover:bg-cyan-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                           >
-                            Launch Task
+                            {task.type === 'Conduct Mock Interview' ? '🎤 Join Interview' : 'Launch Task'}
                           </Button>
                         )}
                       </div>
@@ -3944,9 +3949,27 @@ function AssignTasksView({
   const [gradingMode, setGradingMode] = useState<'Auto-Evaluated' | 'Manual Grading'>('Auto-Evaluated');
   
   // Revised Generation Workflow States
-  const [genStep, setGenStep] = useState<'type' | 'path' | 'blueprint' | 'review'>('type');
+  const [genStep, setGenStep] = useState<'type' | 'path' | 'blueprint' | 'review' | 'interview-setup'>('type');
   const [genPath, setGenPath] = useState<'source' | 'ai' | null>(null);
   const [sourceData, setSourceData] = useState({ text: '', fileName: '' });
+  
+  // Interview-specific state
+  const [interviewQuestions, setInterviewQuestions] = useState<import('./types').InterviewQuestion[]>([]);
+  const [customQuestionText, setCustomQuestionText] = useState('');
+  const [aiGenDomain, setAiGenDomain] = useState('');
+  const [generatingInterviewQs, setGeneratingInterviewQs] = useState(false);
+  const PRESET_INTERVIEW_QUESTIONS: import('./types').InterviewQuestion[] = [
+    { id: 'iq-1', question: 'Tell me about yourself and your background.', category: 'Introduction' },
+    { id: 'iq-2', question: 'What are your greatest strengths and weaknesses?', category: 'Introduction' },
+    { id: 'iq-3', question: 'Where do you see yourself in 5 years?', category: 'Behavioral' },
+    { id: 'iq-4', question: 'Describe a challenging situation you faced and how you resolved it.', category: 'Behavioral' },
+    { id: 'iq-5', question: 'Why should we hire you over other candidates?', category: 'Behavioral' },
+    { id: 'iq-6', question: 'Explain a project you worked on and your specific contribution.', category: 'Technical' },
+    { id: 'iq-7', question: 'What programming languages are you proficient in and why?', category: 'Technical' },
+    { id: 'iq-8', question: 'What is the difference between OOP and functional programming?', category: 'Technical' },
+    { id: 'iq-9', question: 'How do you handle pressure and tight deadlines?', category: 'Situational' },
+    { id: 'iq-10', question: 'Describe a time when you had to work in a team. What was your role?', category: 'Situational' },
+  ];
   
   const [mockBlueprint, setMockBlueprint] = useState<MockTestBlueprint>({
     year: 'III Year',
@@ -4008,11 +4031,13 @@ function AssignTasksView({
       randomize: selectedType === 'Create New Assignment' ? randomize : false,
       gradingMode: selectedType === 'Create New Assignment' ? gradingMode : 'Auto-Evaluated',
       createdAt: new Date().toISOString(),
-      content: (selectedType === 'Conduct Mock Test' || selectedType === 'Create New Assignment')
-        ? (selectedType === 'Conduct Mock Test' 
-            ? { blueprint: mockBlueprint, questions: generatedQuestions, totalMarks: generatedQuestions.reduce((a, b) => a + b.marks, 0) }
-            : { subject: mockBlueprint.subject, topic: mockBlueprint.topic, questions: generatedQuestions })
-        : undefined
+      content: selectedType === 'Conduct Mock Interview'
+        ? { questions: interviewQuestions, instructions: newActivity.description }
+        : (selectedType === 'Conduct Mock Test' || selectedType === 'Create New Assignment')
+          ? (selectedType === 'Conduct Mock Test' 
+              ? { blueprint: mockBlueprint, questions: generatedQuestions, totalMarks: generatedQuestions.reduce((a, b) => a + b.marks, 0) }
+              : { subject: mockBlueprint.subject, topic: mockBlueprint.topic, questions: generatedQuestions })
+          : undefined
     };
 
     setGenerating(true);
@@ -4061,6 +4086,9 @@ function AssignTasksView({
     setRandomize(false);
     setGradingMode('Auto-Evaluated');
     setNewActivity({ title: '', dueDate: '', description: '' });
+    setInterviewQuestions([]);
+    setCustomQuestionText('');
+    setAiGenDomain('');
     setMockBlueprint({
       year: 'III Year',
       subject: '',
@@ -4255,6 +4283,7 @@ function AssignTasksView({
                    else if (genStep === 'blueprint') setGenStep('path');
                    else if (genStep === 'path') setGenStep('type');
                    else if (genStep === 'details') setGenStep('type');
+                   else if (genStep === 'interview-setup') setGenStep('type');
                 }}
                 className="absolute -top-14 -left-8 p-3 hover:bg-slate-100 rounded-full transition-colors group"
                >
@@ -4266,13 +4295,16 @@ function AssignTasksView({
               {genStep === 'type' ? "Assign New Activity" : 
                genStep === 'path' ? "Generation Methodology" :
                genStep === 'blueprint' ? "Review Blueprint" : 
-               genStep === 'details' ? "Activity Details" : "Verify Questions"}
+               genStep === 'details' ? "Activity Details" : 
+               genStep === 'interview-setup' ? "Configure Mock Interview" :
+               "Verify Questions"}
             </DialogTitle>
             <p className="text-center text-slate-500 font-medium mb-8">
               {genStep === 'type' ? "Select the baseline intervention type for your batch" :
                genStep === 'path' ? "Choose how you want Chetas AI to curate the content" :
                genStep === 'blueprint' ? "Adjust question distributions before AI curates the paper" : 
                genStep === 'details' ? "Provide configuration and context for the manual activity" :
+               genStep === 'interview-setup' ? "Select or add questions for the AI interviewer to ask" :
                "Ensure quality and accuracy before assigning to batch"}
             </p>
 
@@ -4285,7 +4317,14 @@ function AssignTasksView({
                       disabled={option.isComingSoon}
                       onClick={() => {
                         setSelectedType(option.type);
-                        if (option.type === 'Conduct Mock Test') {
+                        if (option.type === 'Conduct Mock Interview') {
+                          setGenStep('interview-setup');
+                          setNewActivity({
+                            title: `Mock Interview — ${teacher?.batch}`,
+                            description: 'AI-powered mock interview to assess communication, confidence, and technical knowledge.',
+                            dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                          });
+                        } else if (option.type === 'Conduct Mock Test') {
                           setGenStep('path');
                           setMockBlueprint(prev => ({
                             ...prev,
@@ -4449,7 +4488,108 @@ function AssignTasksView({
                 </motion.div>
               )}
 
+              {genStep === 'interview-setup' && (
+                <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Left: config */}
+                    <div className="space-y-5">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Activity Title</Label>
+                        <Input value={newActivity.title} onChange={e => setNewActivity({...newActivity, title: e.target.value})} placeholder="e.g., HR Mock Round-1" className="rounded-2xl h-12 bg-white border-slate-100 font-bold" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Due Date</Label>
+                        <Input type="date" value={newActivity.dueDate} onChange={e => setNewActivity({...newActivity, dueDate: e.target.value})} className="rounded-2xl h-12 bg-white border-slate-100 font-bold" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Instructions (optional)</Label>
+                        <Textarea value={newActivity.description} onChange={e => setNewActivity({...newActivity, description: e.target.value})} placeholder="Add guidelines for the student..." className="rounded-3xl min-h-[80px] bg-white border-slate-100" />
+                      </div>
+                      <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-3">
+                        <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Generate Questions</Label>
+                        <div className="flex gap-2">
+                          <Input value={aiGenDomain} onChange={e => setAiGenDomain(e.target.value)} placeholder="Domain: e.g. Full Stack, Data Science" className="rounded-xl h-10 text-sm flex-1" />
+                          <Button size="sm" disabled={!aiGenDomain || generatingInterviewQs} onClick={async () => {
+                            setGeneratingInterviewQs(true);
+                            try {
+                              const generated = await aiInterviewService.generateInterviewQuestions(aiGenDomain, 'Mixed', 6);
+                              setInterviewQuestions(prev => {
+                                const existingIds = new Set(prev.map(q => q.id));
+                                return [...prev, ...generated.filter((q: any) => !existingIds.has(q.id))];
+                              });
+                              toast.success(`Generated ${generated.length} questions!`);
+                            } catch { toast.error('AI generation failed'); }
+                            finally { setGeneratingInterviewQs(false); }
+                          }} className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 h-10 whitespace-nowrap">
+                            {generatingInterviewQs ? '...' : 'AI Generate'}
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Add Custom Question</Label>
+                        <div className="flex gap-2">
+                          <Input value={customQuestionText} onChange={e => setCustomQuestionText(e.target.value)} placeholder="Type your own question..." className="rounded-xl h-10 text-sm flex-1" onKeyDown={e => {
+                            if (e.key === 'Enter' && customQuestionText.trim()) {
+                              setInterviewQuestions(prev => [...prev, { id: `custom-${Date.now()}`, question: customQuestionText.trim(), category: 'Custom' }]);
+                              setCustomQuestionText('');
+                            }
+                          }} />
+                          <Button size="sm" disabled={!customQuestionText.trim()} onClick={() => {
+                            setInterviewQuestions(prev => [...prev, { id: `custom-${Date.now()}`, question: customQuestionText.trim(), category: 'Custom' }]);
+                            setCustomQuestionText('');
+                          }} className="rounded-xl h-10 px-4 font-bold"><Plus className="w-4 h-4" /></Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: question bank + selected */}
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Preset Question Bank</Label>
+                        <p className="text-xs text-slate-400 mb-3">Click to add to your interview</p>
+                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                          {PRESET_INTERVIEW_QUESTIONS.filter(pq => !interviewQuestions.find(iq => iq.id === pq.id)).map(q => (
+                            <button key={q.id} onClick={() => setInterviewQuestions(prev => [...prev, q])}
+                              className="w-full text-left p-3 rounded-xl border border-slate-100 hover:border-indigo-300 hover:bg-indigo-50/50 transition-all text-sm text-slate-700 flex justify-between items-start gap-2 group">
+                              <span>{q.question}</span>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <Badge variant="outline" className="text-[9px] font-bold">{q.category}</Badge>
+                                <Plus className="w-4 h-4 text-indigo-400 opacity-0 group-hover:opacity-100 shrink-0" />
+                              </div>
+                            </button>
+                          ))}
+                          {PRESET_INTERVIEW_QUESTIONS.filter(pq => !interviewQuestions.find(iq => iq.id === pq.id)).length === 0 && (
+                            <p className="text-slate-400 text-sm italic text-center py-4">All presets added!</p>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Selected Questions ({interviewQuestions.length})</Label>
+                        <div className="space-y-2 max-h-48 overflow-y-auto mt-2">
+                          {interviewQuestions.length === 0 ? (
+                            <div className="text-center py-6 text-slate-400 italic text-sm border border-dashed border-slate-200 rounded-2xl">No questions selected yet</div>
+                          ) : interviewQuestions.map((q, i) => (
+                            <div key={q.id} className="flex items-start gap-2 p-3 rounded-xl bg-indigo-50 border border-indigo-100">
+                              <span className="text-indigo-400 font-black text-sm shrink-0">{i + 1}.</span>
+                              <p className="text-sm text-slate-700 flex-1">{q.question}</p>
+                              <button onClick={() => setInterviewQuestions(prev => prev.filter(x => x.id !== q.id))} className="text-slate-400 hover:text-rose-500 shrink-0">
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <Button onClick={handleCreateTask} disabled={generating || interviewQuestions.length === 0 || !newActivity.title || !newActivity.dueDate}
+                        className="w-full h-14 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-lg shadow-xl shadow-indigo-100 gap-3 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none">
+                        {generating ? 'Publishing...' : `Publish Interview (${interviewQuestions.length} questions) `}<ArrowRight className="w-5 h-5" />
+                      </Button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
               {genStep === 'blueprint' && (
+
                 <motion.div 
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}

@@ -4,7 +4,7 @@
  */
 
 import { Type } from "@google/genai";
-import { AssignmentContent, MockTestBlueprint, MockTestContent, Question, QuestionType } from "../types";
+import { AssignmentContent, InterviewQuestion, InterviewReport, InterviewTurn, MockTestBlueprint, MockTestContent, Question, QuestionType } from "../types";
 import { apiService } from "./apiService";
 
 export const aiAcademicService = {
@@ -144,5 +144,133 @@ export const aiAcademicService = {
     });
     const totalMarks = questions.reduce((acc, q) => acc + q.marks, 0);
     return { blueprint, questions, totalMarks };
+  }
+};
+
+export const aiInterviewService = {
+  async generateInterviewQuestions(domain: string, category: string, count: number): Promise<InterviewQuestion[]> {
+    const prompt = `Generate ${count} mock interview questions for engineering students for a placement drive. Domain: ${domain}. Focus on ${category} type questions. Return a JSON array where each item has: id (unique string), question (the interview question text), category (one of: Introduction, Technical, Behavioral, Situational, Custom).`;
+
+    const res = await apiService.generateAIContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              id: { type: Type.STRING },
+              question: { type: Type.STRING },
+              category: { type: Type.STRING }
+            },
+            required: ['id', 'question', 'category']
+          }
+        }
+      }
+    });
+    return JSON.parse(res.text);
+  },
+
+  async getAIResponse(conversationHistory: InterviewTurn[], questions: InterviewQuestion[]): Promise<string> {
+    const questionList = questions.map((q, i) => `${i + 1}. ${q.question}`).join('\n');
+    const systemInstruction = `You are SAR AI, a professional and friendly mock interviewer for engineering college students preparing for campus placements. Your task is to conduct a structured mock interview.
+
+The interview questions are:
+${questionList}
+
+Instructions:
+- Ask one question at a time in the exact order given.
+- After the student answers, give ONE brief positive acknowledgment (1 sentence, max 15 words), then immediately ask the next question.
+- Do NOT repeat the question number. Just ask the question naturally.
+- When all questions are done, say: "That concludes our interview today. Thank you for your time and effort. I will now generate your performance report. Please wait a moment."
+- Keep your tone warm, professional, and encouraging at all times.
+- NEVER ask questions outside the provided list.`;
+
+    const messages = conversationHistory.map(t => ({
+      role: t.role === 'ai' ? 'model' : 'user',
+      parts: [{ text: t.text }]
+    }));
+
+    const res = await apiService.generateAIContent({
+      contents: messages,
+      config: { systemInstruction }
+    });
+    return res.text;
+  },
+
+  async generateInterviewReport(
+    turns: InterviewTurn[],
+    questions: InterviewQuestion[],
+    studentName: string,
+    studentId: string,
+    taskId: string
+  ): Promise<InterviewReport> {
+    const transcript = turns.map(t => `${t.role === 'ai' ? 'SAR AI' : studentName}: ${t.text}`).join('\n');
+    const questionList = questions.map(q => q.question).join('\n');
+
+    const prompt = `You are an expert HR analyst and career coach evaluating a mock interview transcript for an engineering student.
+
+Student Name: ${studentName}
+Interview Questions Asked:
+${questionList}
+
+Full Transcript:
+${transcript}
+
+Analyze the student's performance and return a JSON report with the following structure:
+- overallScore: number 1-10
+- fluency: number 1-10 (how smoothly they spoke, fillers like umm/uh, flow)
+- confidence: number 1-10 (assertiveness, tone, conviction)
+- vocabulary: number 1-10 (word choice, professional language)
+- clarity: number 1-10 (how well they structured and communicated answers)
+- summary: string (3-4 sentence overall narrative summary)
+- questionAnalysis: array of { question: string, studentAnswer: string, score: number 1-10, feedback: string }
+- recommendations: array of 3-5 specific, actionable improvement tips as strings
+
+Be honest but constructive. Base everything strictly on the transcript content.`;
+
+    const res = await apiService.generateAIContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            overallScore: { type: Type.NUMBER },
+            fluency: { type: Type.NUMBER },
+            confidence: { type: Type.NUMBER },
+            vocabulary: { type: Type.NUMBER },
+            clarity: { type: Type.NUMBER },
+            summary: { type: Type.STRING },
+            questionAnalysis: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  question: { type: Type.STRING },
+                  studentAnswer: { type: Type.STRING },
+                  score: { type: Type.NUMBER },
+                  feedback: { type: Type.STRING }
+                },
+                required: ['question', 'studentAnswer', 'score', 'feedback']
+              }
+            },
+            recommendations: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+          required: ['overallScore', 'fluency', 'confidence', 'vocabulary', 'clarity', 'summary', 'questionAnalysis', 'recommendations']
+        }
+      }
+    });
+
+    const parsed = JSON.parse(res.text);
+    return {
+      ...parsed,
+      studentId,
+      studentName,
+      taskId,
+      turns,
+      completedAt: new Date().toISOString()
+    };
   }
 };

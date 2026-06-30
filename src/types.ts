@@ -122,7 +122,7 @@ export interface Task {
   description: string;
   status: 'Active' | 'Expired' | 'Closed';
   createdAt: string;
-  content?: AssignmentContent | MockTestContent;
+  content?: AssignmentContent | MockTestContent | InterviewContent;
   randomize?: boolean; // For assignments
   timeLimit?: number; // In minutes
   gradingMode?: 'Auto-Evaluated' | 'Manual Grading';
@@ -166,13 +166,56 @@ export interface MockTestContent {
   totalMarks: number;
 }
 
+export interface InterviewQuestion {
+  id: string;
+  question: string;
+  category: 'Introduction' | 'Technical' | 'Behavioral' | 'Situational' | 'Custom';
+  followUp?: string;
+}
+
+export interface InterviewContent {
+  questions: InterviewQuestion[];
+  instructions?: string;
+  introMessage?: string;
+}
+
+export interface InterviewTurn {
+  role: 'ai' | 'student';
+  text: string;
+  timestamp: string;
+  questionId?: string;
+}
+
+export interface InterviewQuestionAnalysis {
+  question: string;
+  studentAnswer: string;
+  score: number; // out of 10
+  feedback: string;
+}
+
+export interface InterviewReport {
+  studentId: string;
+  studentName: string;
+  taskId: string;
+  turns: InterviewTurn[];
+  overallScore: number; // out of 10
+  fluency: number; // out of 10
+  confidence: number; // out of 10
+  vocabulary: number; // out of 10
+  clarity: number; // out of 10
+  summary: string;
+  questionAnalysis: InterviewQuestionAnalysis[];
+  recommendations: string[];
+  completedAt: string;
+}
+
 export interface Submission {
   id: string;
   taskId: string;
   studentId: string;
   studentName: string;
   batchId: string;
-  type: 'Assignment' | 'MockTest';
+  type: 'Assignment' | 'MockTest' | 'MockInterview';
   submittedAt: string;
   status: 'Auto-Evaluated' | 'Awaiting-Manual-Grading' | 'Graded';
   score?: number;
@@ -181,6 +224,7 @@ export interface Submission {
   attachmentUrl?: string; // For Mock Test PDF uploads
   teacherId: string;
   submissionReason?: string;
+  interviewReport?: InterviewReport; // For mock interviews
 }
 
 export interface AuditLogEntry {
