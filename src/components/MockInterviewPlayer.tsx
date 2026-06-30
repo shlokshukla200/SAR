@@ -133,6 +133,9 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
     if (phase === 'running') {
       timerRef.current = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
     }
+    if (phase === 'running' && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [phase]);
 
@@ -248,7 +251,7 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
 
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = setTimeout(() => {
-        if (transcriptBuildRef.current.trim().length > 3) recognition.stop();
+        if (transcriptBuildRef.current.trim().length > 0) recognition.stop();
       }, 3000);
     };
 
@@ -258,11 +261,6 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
       const answer = transcriptBuildRef.current.trim();
 
       if (!answer) {
-        const noop = "I didn't catch that. Could you please repeat?";
-        const t: InterviewTurn = { role: 'ai', text: noop, timestamp: new Date().toISOString() };
-        setTurns(prev => [...prev, t]);
-        setCurrentTranscript('');
-        await speak(noop);
         startListening();
         return;
       }
