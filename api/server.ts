@@ -157,7 +157,8 @@ function mapSubmission(row: any) {
     answers: row.answers,
     attachmentUrl: row.attachment_url,
     teacherId: row.teacher_id,
-    submissionReason: row.submission_reason
+    submissionReason: row.submission_reason,
+    interviewReport: row.interview_report || null
   };
 }
 
@@ -305,12 +306,17 @@ async function initializeDatabase() {
           attachment_url TEXT,
           teacher_id TEXT REFERENCES teachers(id) ON DELETE SET NULL,
           submission_reason TEXT DEFAULT 'Normal Submission',
+          interview_report JSONB DEFAULT NULL,
           is_active BOOLEAN DEFAULT TRUE
         );
       `);
 
       await client.query(`
         ALTER TABLE submissions ADD COLUMN IF NOT EXISTS submission_reason TEXT DEFAULT 'Normal Submission';
+      `);
+
+      await client.query(`
+        ALTER TABLE submissions ADD COLUMN IF NOT EXISTS interview_report JSONB DEFAULT NULL;
       `);
 
       // 6. Audit logs table
@@ -353,7 +359,13 @@ async function initializeDatabase() {
       await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_student_id ON submissions(student_id);");
     }
 
+    // Always-run migrations (safe for existing DBs)
+    await client.query(`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS submission_reason TEXT DEFAULT 'Normal Submission';`);
+    await client.query(`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS interview_report JSONB DEFAULT NULL;`);
+    await client.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS grading_mode TEXT DEFAULT 'Auto-Evaluated';`);
+
     // Seed the default system administrator if it does not exist
+
       const adminPassword = process.env.ADMIN_PASSWORD || 'password@admin';
       await client.query(`
         INSERT INTO teachers (id, employee_id, username, password, name, role, department, contact_no, email_id, batch, assigned_batches, performance_details)
@@ -858,8 +870,8 @@ app.use(express.json({ limit: '50mb' }));
 
       await pool.query(`
         INSERT INTO submissions (
-          id, task_id, student_id, student_name, batch_id, type, submitted_at, status, score, total_marks, answers, attachment_url, teacher_id, submission_reason, is_active
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, TRUE)
+          id, task_id, student_id, student_name, batch_id, type, submitted_at, status, score, total_marks, answers, attachment_url, teacher_id, submission_reason, interview_report, is_active
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15::jsonb, TRUE)
         ON CONFLICT (id) DO UPDATE SET
           status = EXCLUDED.status,
           score = EXCLUDED.score,
@@ -867,13 +879,15 @@ app.use(express.json({ limit: '50mb' }));
           attachment_url = EXCLUDED.attachment_url,
           submitted_at = EXCLUDED.submitted_at,
           submission_reason = EXCLUDED.submission_reason,
+          interview_report = EXCLUDED.interview_report,
           is_active = TRUE;
       `, [
         sub.id, sub.taskId, sub.studentId, sub.studentName, sub.batchId, sub.type,
         sub.submittedAt || new Date().toISOString(), sub.status || "Auto-Evaluated",
         sub.score !== undefined ? sub.score : null, sub.totalMarks || 0,
         JSON.stringify(sub.answers || []), sub.attachmentUrl || null, sub.teacherId === 'None' ? null : (sub.teacherId || null),
-        sub.submissionReason || 'Normal Submission'
+        sub.submissionReason || 'Normal Submission',
+        sub.interviewReport ? JSON.stringify(sub.interviewReport) : null
       ]);
 
       res.json({ success: true });
