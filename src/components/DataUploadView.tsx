@@ -47,7 +47,7 @@ import {
   SelectValue 
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { apiService } from '../lib/apiService';
+
 
 interface DataUploadViewProps {
   onDataExtracted: (students: Student[]) => void;

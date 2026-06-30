@@ -491,7 +491,68 @@ app.use(express.json({ limit: '50mb' }));
       });
     }
   });
+  // Student activation endpoints (public)
+  app.get("/api/check-student", async (req, res) => {
+    try {
+      const { searchId } = req.query;
+      if (!searchId || typeof searchId !== 'string') return res.json({ found: false });
+      const queryId = searchId.trim().toLowerCase();
+      
+      const result = await pool.query(
+        "SELECT id, name, college_id, roll_no, is_activated, batch FROM students WHERE LOWER(college_id) = $1 OR LOWER(roll_no) = $1",
+        [queryId]
+      );
+      
+      if (result.rows.length === 0) {
+        return res.json({ found: false });
+      }
+      
+      const row = result.rows[0];
+      res.json({ 
+        found: true, 
+        student: {
+          id: row.id,
+          name: row.name,
+          collegeId: row.college_id,
+          rollNo: row.roll_no,
+          isActivated: row.is_activated,
+          batch: row.batch
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
+  app.post("/api/activate-student", async (req, res) => {
+    try {
+      const { id, username, password } = req.body;
+      if (!id || !username || !password) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      const result = await pool.query(
+        "UPDATE students SET username = $1, password = $2, is_activated = TRUE, is_registered = TRUE WHERE id = $3 RETURNING *",
+        [username, password, id]
+      );
+      
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Student not found" });
+      }
+
+      const user = mapStudent(result.rows[0]);
+      const token = Buffer.from(JSON.stringify({ 
+        id: user.id, 
+        role: 'student', 
+        exp: Date.now() + 86400000 
+      })).toString('base64');
+
+      res.json({ success: true, token, user });
+    } catch (e: any) {
+      console.error("Activation error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
   // Simple JWT-like Session Middleware
   const verifyToken = (req: any, res: any, next: any) => {
     const authHeader = req.headers.authorization;

@@ -724,10 +724,20 @@ function AppContent() {
                 onBack={() => setLoginStep('form')}
                 onActivate={async (updatedStudent) => {
                   try {
-                    await apiService.saveStudents([updatedStudent]);
-                    setStudents(prev => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
-                    setCurrentStudent(updatedStudent);
-                    localStorage.setItem('sar_currentStudent', JSON.stringify(updatedStudent));
+                    const result = await apiService.activateStudent({
+                      id: updatedStudent.id,
+                      username: updatedStudent.username,
+                      password: updatedStudent.password
+                    });
+                    
+                    if (result.token) {
+                      localStorage.setItem('sar_token', result.token);
+                    }
+                    
+                    const finalStudent = result.user || updatedStudent;
+                    setStudents(prev => prev.map(s => s.id === finalStudent.id ? finalStudent : s));
+                    setCurrentStudent(finalStudent);
+                    localStorage.setItem('sar_currentStudent', JSON.stringify(finalStudent));
                     setUserRole('student');
                     setIsLoggedIn(true);
                     localStorage.setItem('sar_isLoggedIn', 'true');
@@ -1796,24 +1806,30 @@ function StudentActivationView({
   const [step, setStep] = useState(1);
   const [foundStudent, setFoundStudent] = useState<Student | null>(null);
 
-  const handleVerify = () => {
+  const handleVerify = async () => {
     const searchId = collegeId.trim().toLowerCase();
-    const student = students.find(s => 
-      s.collegeId?.toLowerCase() === searchId || 
-      s.rollNo?.toLowerCase() === searchId
-    );
-    if (!student) {
-      toast.error('No student found with this ID');
-      return;
+    
+    try {
+      const res = await apiService.checkStudent(searchId);
+      if (!res.found || !res.student) {
+        toast.error('No student found with this ID');
+        return;
+      }
+      
+      const student = res.student;
+      
+      if (student.isActivated) {
+        toast.error('Account already activated. Please login directly.');
+        onBack();
+        return;
+      }
+      
+      setFoundStudent(student);
+      setStep(2);
+      toast.success('Identity verified!');
+    } catch (e: any) {
+      toast.error('Error verifying identity. Please try again.');
     }
-    if (student.isActivated) {
-      toast.error('Account already activated. Please login directly.');
-      onBack();
-      return;
-    }
-    setFoundStudent(student);
-    setStep(2);
-    toast.success('Identity verified!');
   };
 
   const handleComplete = () => {

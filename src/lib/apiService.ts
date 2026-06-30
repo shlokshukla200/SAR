@@ -55,6 +55,20 @@ export const apiService = {
   },
 
   // Students
+  async checkStudent(searchId: string): Promise<{ found: boolean, student?: any }> {
+    const res = await apiFetch(`/api/check-student?searchId=${encodeURIComponent(searchId)}`);
+    return res;
+  },
+
+  async activateStudent(payload: { id: string, username: string, password: string }) {
+    const res = await apiFetch('/api/activate-student', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return res;
+  },
+
   async saveStudents(students: Student[]) {
     await apiFetch('/api/students', {
       method: 'POST',
