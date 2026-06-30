@@ -153,7 +153,7 @@ import { apiService } from './lib/apiService';
 import InboxView from './components/InboxView';
 import { Message } from './types';
 
-type View = 'dashboard' | 'students' | 'marks' | 'reports' | 'student-detail' | 'upload' | 'teacher-profile' | 'student-portal-profile' | 'student-activities' | 'student-sessions' | 'batch-control' | 'faculty-mgmt' | 'skill-config' | 'assign-tasks' | 'inbox';
+type View = 'dashboard' | 'students' | 'marks' | 'reports' | 'student-detail' | 'upload' | 'teacher-profile' | 'student-portal-profile' | 'student-activities' | 'student-sessions' | 'student-results' | 'batch-control' | 'faculty-mgmt' | 'skill-config' | 'assign-tasks' | 'inbox';
 type LoginStep = 'role' | 'form' | 'activate';
 
 interface ActivityLog {
@@ -875,6 +875,13 @@ function AppContent() {
                 collapsed={isSidebarCollapsed}
               />
               <SidebarItem 
+                icon={<FileText className="w-5 h-5" />} 
+                label="My Results" 
+                active={currentView === 'student-results'} 
+                onClick={() => setCurrentView('student-results')} 
+                collapsed={isSidebarCollapsed}
+              />
+              <SidebarItem 
                 icon={<Calendar className="w-5 h-5" />} 
                 label="Alloted Sessions" 
                 active={currentView === 'student-sessions'} 
@@ -1161,6 +1168,11 @@ function AppContent() {
                 activeTask={activeTask}
                 setActiveTask={setActiveTask}
               />
+            </div>
+          )}
+          {currentView === 'student-results' && currentStudent && (
+            <div key="student-results">
+              <StudentResultsView student={currentStudent} />
             </div>
           )}
           {currentView === 'student-sessions' && currentStudent && (
@@ -2504,13 +2516,6 @@ function TaskPlayer({ task, student, onBack }: { task: Task, student: Student, o
   const [grading, setGrading] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  const [fullscreenWarnings, setFullscreenWarnings] = useState(0);
-  const [tabSwitchWarnings, setTabSwitchWarnings] = useState(0);
-  const [securityWarnings, setSecurityWarnings] = useState(0);
-  const [isFullscreenActive, setIsFullscreenActive] = useState(false);
-  const [proctorStarted, setProctorStarted] = useState(false);
-  const [fullscreenCountdown, setFullscreenCountdown] = useState(5);
-
   const triggerAutoSubmit = (reason: string) => {
     if (task.type === 'Create New Assignment') {
       handleSubmitAssignment(reason);
@@ -2519,131 +2524,7 @@ function TaskPlayer({ task, student, onBack }: { task: Task, student: Student, o
     }
   };
 
-  useEffect(() => {
-    if (isFullscreenActive) {
-      setFullscreenCountdown(5);
-    }
-  }, [isFullscreenActive]);
 
-  useEffect(() => {
-    if (!proctorStarted || submitted || isFullscreenActive) return;
-
-    const timer = setInterval(() => {
-      setFullscreenCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          triggerAutoSubmit('Exited Fullscreen');
-          toast.error("Test auto-submitted due to leaving fullscreen mode for more than 5 seconds.");
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [isFullscreenActive, proctorStarted, submitted]);
-
-  useEffect(() => {
-    if (!proctorStarted || submitted) return;
-
-    const handleFullscreenChange = () => {
-      const active = !!document.fullscreenElement;
-      setIsFullscreenActive(active);
-      if (!active) {
-        setFullscreenWarnings(prev => {
-          const next = prev + 1;
-          if (next >= 3) {
-            toast.error("Test auto-submitted due to multiple fullscreen violations.");
-            triggerAutoSubmit('Exited Fullscreen');
-          } else {
-            toast.warning(`Warning: Exiting fullscreen is not allowed! (Violation ${next}/3)`);
-          }
-          return next;
-        });
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        setTabSwitchWarnings(prev => {
-          const next = prev + 1;
-          if (next >= 3) {
-            toast.error("Test auto-submitted due to multiple tab-switching violations.");
-            triggerAutoSubmit('Tab Switched');
-          } else {
-            toast.warning(`Warning: Tab switching is not allowed! (Violation ${next}/3)`);
-          }
-          return next;
-        });
-      }
-    };
-
-    const handleWindowBlur = () => {
-      setTabSwitchWarnings(prev => {
-        const next = prev + 1;
-        if (next >= 3) {
-          toast.error("Test auto-submitted due to multiple focus loss violations.");
-          triggerAutoSubmit('Tab Switched');
-        } else {
-          toast.warning(`Warning: Leaving the test window is not allowed! (Violation ${next}/3)`);
-        }
-        return next;
-      });
-    };
-
-    const blockEvent = (e: Event) => e.preventDefault();
-    
-    const blockKeydown = (e: KeyboardEvent) => {
-      const isCmd = e.ctrlKey || e.metaKey;
-      if (
-        (isCmd && e.key === 'c') || 
-        (isCmd && e.key === 'v') || 
-        (isCmd && e.key === 'x') || 
-        (isCmd && e.key === 'f') || 
-        (isCmd && e.key === 'p') || 
-        (isCmd && e.key === 'a') || 
-        (isCmd && e.key === 's') || 
-        e.key === 'F12' || 
-        e.key === 'PrintScreen' ||
-        (isCmd && e.shiftKey && e.key === 'I') || 
-        (isCmd && e.shiftKey && e.key === 'J') || 
-        (isCmd && e.shiftKey && e.key === 'C')
-      ) {
-        e.preventDefault();
-        toast.error("Security policy blocks this action.");
-        setSecurityWarnings(prev => {
-          const next = prev + 1;
-          if (next >= 3) {
-            toast.error("Test auto-submitted due to multiple security violations.");
-            triggerAutoSubmit('Tried to Take Screenshot / Copy-Paste');
-          }
-          return next;
-        });
-      }
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleWindowBlur);
-    document.addEventListener('contextmenu', blockEvent);
-    document.addEventListener('copy', blockEvent);
-    document.addEventListener('cut', blockEvent);
-    document.addEventListener('paste', blockEvent);
-    document.addEventListener('dragstart', blockEvent);
-    document.addEventListener('keydown', blockKeydown);
-
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleWindowBlur);
-      document.removeEventListener('contextmenu', blockEvent);
-      document.removeEventListener('copy', blockEvent);
-      document.removeEventListener('cut', blockEvent);
-      document.removeEventListener('paste', blockEvent);
-      document.removeEventListener('dragstart', blockEvent);
-      document.removeEventListener('keydown', blockKeydown);
-    };
-  }, [proctorStarted, submitted]);
 
   useEffect(() => {
     if (task.type === 'Create New Assignment' && task.content) {
@@ -2692,14 +2573,6 @@ function TaskPlayer({ task, student, onBack }: { task: Task, student: Student, o
     let finalReason = 'Normal Submission';
     if (typeof reason === 'string' && reason !== 'Normal Submission') {
       finalReason = reason;
-    } else {
-      const details: string[] = [];
-      if (fullscreenWarnings > 0) details.push(`${fullscreenWarnings} Fullscreen Warning(s)`);
-      if (tabSwitchWarnings > 0) details.push(`${tabSwitchWarnings} Tab Switch Warning(s)`);
-      if (securityWarnings > 0) details.push(`${securityWarnings} Security Warning(s)`);
-      if (details.length > 0) {
-        finalReason = `Normal Submission (${details.join(', ')})`;
-      }
     }
     const submissionId = `sub_${task.id}_${student.id}`;
     const submission: Submission = {
@@ -2767,14 +2640,6 @@ function TaskPlayer({ task, student, onBack }: { task: Task, student: Student, o
     let finalReason = 'Normal Submission';
     if (typeof reason === 'string') {
       finalReason = reason;
-    } else {
-      const details: string[] = [];
-      if (fullscreenWarnings > 0) details.push(`${fullscreenWarnings} Fullscreen Warning(s)`);
-      if (tabSwitchWarnings > 0) details.push(`${tabSwitchWarnings} Tab Switch Warning(s)`);
-      if (securityWarnings > 0) details.push(`${securityWarnings} Security Warning(s)`);
-      if (details.length > 0) {
-        finalReason = `Normal Submission (${details.join(', ')})`;
-      }
     }
     const isManual = task.gradingMode === 'Manual Grading';
     const submissionId = `sub_${task.id}_${student.id}`;
@@ -2810,9 +2675,6 @@ function TaskPlayer({ task, student, onBack }: { task: Task, student: Student, o
   };
 
   if (submitted) {
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(err => console.error(err));
-    }
     return (
       <Card className="rounded-[3rem] p-12 text-center space-y-6">
         <CheckCircle2 className="w-20 h-20 text-emerald-500 mx-auto" />
@@ -2823,95 +2685,12 @@ function TaskPlayer({ task, student, onBack }: { task: Task, student: Student, o
     );
   }
 
-  const isProctored = task.type === 'Create New Assignment' || task.type === 'Conduct Mock Test';
 
-  if (isProctored && !proctorStarted) {
-    return (
-      <Card className="rounded-[3rem] p-12 max-w-2xl mx-auto text-center space-y-8 bg-white/85 backdrop-blur-md border border-slate-100 shadow-xl mt-10">
-        <div className="mx-auto w-20 h-20 bg-indigo-50 rounded-[2rem] flex items-center justify-center">
-          <ShieldCheck className="w-10 h-10 text-indigo-600 animate-pulse" />
-        </div>
-        <div className="space-y-3">
-          <h2 className="text-3xl font-black text-slate-900">Proctored Assignment</h2>
-          <p className="text-sm text-slate-500 font-medium">
-            This activity is monitored. To ensure academic integrity, please review the rules before launching:
-          </p>
-        </div>
-
-        <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 text-left space-y-3 text-xs font-semibold text-slate-600">
-          <div className="flex items-start gap-2.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 mt-1.5 shrink-0" />
-            <p><strong>Fullscreen Mode Required</strong>: The test must be taken in fullscreen. Exiting fullscreen will trigger a warning. Exiting 3 times will auto-submit the exam.</p>
-          </div>
-          <div className="flex items-start gap-2.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 mt-1.5 shrink-0" />
-            <p><strong>Strict Focus Monitoring</strong>: Switching tabs or leaving the test window will trigger warnings. 3 focus losses will auto-submit the exam.</p>
-          </div>
-          <div className="flex items-start gap-2.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 mt-1.5 shrink-0" />
-            <p><strong>Copy-Paste & Context Menu Restrictions</strong>: Copying, pasting, right-clicking, text selection, and search keyboard shortcuts are completely disabled.</p>
-          </div>
-        </div>
-
-        <Button 
-          onClick={async () => {
-            try {
-              await document.documentElement.requestFullscreen();
-              setProctorStarted(true);
-              setIsFullscreenActive(true);
-              toast.success("Fullscreen activated. Good luck!");
-            } catch (err) {
-              toast.error("Failed to enter fullscreen mode. Please check browser permissions.");
-            }
-          }} 
-          className="w-full h-14 rounded-2xl bg-indigo-600 hover:bg-indigo-700 font-bold text-lg text-white"
-        >
-          Enter Fullscreen & Start Exam
-        </Button>
-      </Card>
-    );
-  }
-
-  if (isProctored && !isFullscreenActive) {
-    return (
-      <Card className="rounded-[3rem] p-12 max-w-xl mx-auto text-center space-y-6 bg-rose-50/80 backdrop-blur-md border border-rose-100 shadow-xl mt-12">
-        <AlertCircle className="w-16 h-16 text-rose-500 mx-auto" />
-        <h2 className="text-2xl font-black text-rose-950">Fullscreen Mode Required!</h2>
-        <p className="text-sm text-rose-705 font-medium">
-          You have exited fullscreen mode, which violates exam policy. To resume, please click the button below to re-enter fullscreen mode.
-        </p>
-        <p className="text-sm font-bold text-rose-600 animate-pulse">
-          Auto-submitting in <span className="text-lg font-black">{fullscreenCountdown}</span> seconds...
-        </p>
-        <p className="text-xs font-bold text-rose-500">
-          Warning: Exiting fullscreen repeatedly will result in automatic submission. (Violations: {fullscreenWarnings}/3)
-        </p>
-        <Button 
-          onClick={async () => {
-            try {
-              await document.documentElement.requestFullscreen();
-              setIsFullscreenActive(true);
-            } catch (err) {
-              toast.error("Failed to re-enter fullscreen. Please try again.");
-            }
-          }} 
-          className="rounded-full px-8 h-12 bg-rose-600 hover:bg-rose-700 text-white font-bold"
-        >
-          Re-enter Fullscreen
-        </Button>
-      </Card>
-    );
-  }
 
   return (
-    <div className="space-y-8 max-w-5xl mx-auto pb-20 select-none" style={{ userSelect: 'none' }}>
+    <div className="space-y-8 max-w-5xl mx-auto pb-20">
       <div className="flex justify-between items-center mb-6">
-        <Button variant="ghost" onClick={() => {
-          if (document.fullscreenElement) {
-            document.exitFullscreen().catch(err => console.error(err));
-          }
-          onBack();
-        }} className="rounded-full gap-2">
+        <Button variant="ghost" onClick={onBack} className="rounded-full gap-2">
           <ArrowLeft className="w-4 h-4" /> Exit
         </Button>
         <div className="flex items-center gap-4">
@@ -5650,6 +5429,22 @@ function StudentListView({
     s.rollNo.toLowerCase().includes(search.toLowerCase())
   );
 
+  const sendQuickFeedback = async (student: Student, message: string) => {
+    if (!teacher) return;
+    try {
+      await apiService.sendMessage({
+        senderId: teacher.id,
+        senderName: teacher.name,
+        text: `Quick Feedback: ${message}`,
+        recipientArray: [student.id]
+      });
+      toast.success(`Feedback sent to ${student.name}`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to send feedback');
+    }
+  };
+
   const myAssignedBatches = teacher?.role === 'Admin' 
     ? ['All', ...batchesList.map(b => b.batchId)]
     : (() => {
@@ -5741,16 +5536,16 @@ function StudentListView({
                             Quick Feedback
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-56">
-                            <DropdownMenuItem onClick={() => toast.success(`Feedback sent to ${student.name}: Great progress in communication!`)}>
+                            <DropdownMenuItem onClick={() => sendQuickFeedback(student, "Great progress in communication!")}>
                               🌟 Great progress!
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => toast.success(`Feedback sent to ${student.name}: Needs improvement in technical depth.`)}>
+                            <DropdownMenuItem onClick={() => sendQuickFeedback(student, "Needs improvement in technical depth.")}>
                               📚 Needs tech focus
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => toast.success(`Feedback sent to ${student.name}: Participation in workshops is mandatory.`)}>
+                            <DropdownMenuItem onClick={() => sendQuickFeedback(student, "Participation in workshops is mandatory.")}>
                               ⚠️ Mandatory attendance
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => toast.success(`Feedback sent to ${student.name}: Keep up the consistency!`)}>
+                            <DropdownMenuItem onClick={() => sendQuickFeedback(student, "Keep up the consistency!")}>
                               🎯 Keep it up
                             </DropdownMenuItem>
                           </DropdownMenuContent>
@@ -5787,13 +5582,15 @@ function SubmissionGradingDialog({
   task,
   onGrade,
   onDelete,
-  trigger
+  trigger,
+  readOnly = false
 }: {
   sub: Submission;
   task?: Task;
   onGrade: (score: number) => void;
   onDelete?: (submissionId: string) => void;
   trigger: React.ReactNode;
+  readOnly?: boolean;
 }) {
   const [scoreInput, setScoreInput] = useState<string>('');
   const [isEditing, setIsEditing] = useState(false);
@@ -5983,7 +5780,7 @@ function SubmissionGradingDialog({
           <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-4 text-left">
             <h4 className="font-bold text-slate-800 flex items-center justify-between">
               <span>Marks Awarded</span>
-              {!isEditing && (
+              {!readOnly && !isEditing && (
                 <Button 
                   variant="ghost" 
                   size="sm" 
@@ -6030,41 +5827,50 @@ function SubmissionGradingDialog({
             ) : (
               <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-100 shadow-sm">
                 <div>
-                  <p className="text-2xl font-black text-slate-900">{sub.score} / {sub.totalMarks}</p>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Final Score</p>
+                  {sub.status === 'Awaiting-Manual-Grading' ? (
+                    <p className="text-sm font-bold text-slate-500 italic">Pending Manual Evaluation</p>
+                  ) : (
+                    <>
+                      <p className="text-2xl font-black text-slate-900">{sub.score} / {sub.totalMarks}</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Final Score</p>
+                    </>
+                  )}
                 </div>
-                <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100 rounded-full font-bold uppercase tracking-widest text-[9px] px-3 py-1">
-                  Graded
-                </Badge>
+                {sub.status !== 'Awaiting-Manual-Grading' && (
+                  <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100 rounded-full font-bold uppercase tracking-widest text-[9px] px-3 py-1">
+                    Graded
+                  </Badge>
+                )}
               </div>
             )}
           </div>
 
           {/* Proctoring & Retest Section */}
-          <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-4 text-left animate-fadeIn">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="font-bold text-slate-800 flex items-center gap-2">
-                  <RefreshCw className="w-5 h-5 text-indigo-600" /> Retention & Retest
-                </h4>
-                <p className="text-xs text-slate-500 mt-1">
-                  Assigning a retest allows the student to retake this activity. This will invalidate the current submission.
-                </p>
+          {!readOnly && (
+            <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-4 text-left animate-fadeIn">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-bold text-slate-800 flex items-center gap-2">
+                    <RefreshCw className="w-5 h-5 text-indigo-600" /> Retention & Retest
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Assigning a retest allows the student to retake this activity. This will invalidate the current submission.
+                  </p>
+                </div>
+                {!showRetestConfirm && (
+                  <Button
+                    onClick={() => setShowRetestConfirm(true)}
+                    variant="outline"
+                    className="rounded-xl border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 font-bold text-xs gap-1.5 h-10 px-4 shrink-0"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Assign Retest
+                  </Button>
+                )}
               </div>
-              {!showRetestConfirm && (
-                <Button
-                  onClick={() => setShowRetestConfirm(true)}
-                  variant="outline"
-                  className="rounded-xl border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 font-bold text-xs gap-1.5 h-10 px-4 shrink-0"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Assign Retest
-                </Button>
-              )}
-            </div>
 
-            {showRetestConfirm && (
-              <div className="p-4 bg-rose-50/50 rounded-2xl border border-rose-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 animate-slideDown">
+              {showRetestConfirm && (
+                <div className="p-4 bg-rose-50/50 rounded-2xl border border-rose-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 animate-slideDown">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-5 h-5 text-rose-600 mt-0.5 shrink-0" />
                   <div>
@@ -6096,6 +5902,7 @@ function SubmissionGradingDialog({
               </div>
             )}
           </div>
+          )}
 
         </div>
       </DialogContent>
@@ -6122,19 +5929,22 @@ function MarksEntryView({
   const [submissionFilter, setSubmissionFilter] = useState<'Assignment' | 'MockTest'>('Assignment');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedActivity, setSelectedActivity] = useState(taskIdFilter || ACTIVITIES[0].id);
+  const [selectedActivity, setSelectedActivity] = useState<string>(taskIdFilter || '');
   const [tasks, setTasks] = useState<Task[]>([]);
 
   useEffect(() => {
     const fetchTasks = async () => {
       try {
-        const fetchedTasks = await apiService.getTasksByBatch(teacher.batch);
+        const fetchedTasks = await apiService.getTasksByBatch(teacher?.batch || '');
         setTasks(fetchedTasks || []);
+        if (!taskIdFilter && fetchedTasks && fetchedTasks.length > 0) {
+          setSelectedActivity(fetchedTasks[0].id);
+        }
       } catch (err) {
         console.error("Error fetching tasks for grading:", err);
       }
     };
-    fetchTasks();
+    if (teacher?.batch) fetchTasks();
   }, []);
 
   useEffect(() => {
@@ -6189,7 +5999,7 @@ function MarksEntryView({
   };
 
   const handleSave = () => {
-    const activity = ACTIVITIES.find(a => a.id === selectedActivity);
+    const activity = tasks.find(a => a.id === selectedActivity);
     const newLogs: ActivityLog[] = [];
     
     Object.entries(entries).forEach(([studentId, data]) => {
@@ -6200,7 +6010,7 @@ function MarksEntryView({
           newLogs.push({
             id: Math.random().toString(36).substr(2, 9),
             studentName: student.name,
-            activityName: activity?.name || 'Unknown Activity',
+            activityName: activity?.title || 'Unknown Activity',
             marks: parseInt(entryData.marks),
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           });
@@ -6277,79 +6087,88 @@ function MarksEntryView({
                 <SelectValue placeholder="Select Activity" />
               </SelectTrigger>
               <SelectContent>
-                {ACTIVITIES.map(a => (
-                  <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                ))}
+                {tasks.length > 0 ? tasks.map(a => (
+                  <SelectItem key={a.id} value={a.id}>{a.title}</SelectItem>
+                )) : (
+                  <SelectItem value="none" disabled>No activities assigned</SelectItem>
+                )}
               </SelectContent>
             </Select>
-            <Button onClick={handleSave} className="bg-indigo-600 hover:bg-indigo-700 rounded-xl px-6">Save All Changes</Button>
+            <Button onClick={handleSave} disabled={tasks.length === 0} className="bg-indigo-600 hover:bg-indigo-700 rounded-xl px-6">Save All Changes</Button>
           </div>
 
-          <Card className="border-none shadow-sm overflow-hidden rounded-[2.5rem]">
-            <Table>
-              <TableHeader className="bg-slate-50/50">
-                <TableRow>
-                  <TableHead className="py-4 font-bold text-slate-700">Student Name</TableHead>
-                  <TableHead className="py-4 font-bold text-slate-700">Roll Number</TableHead>
-                  <TableHead className="py-4 font-bold text-slate-700">Attendance</TableHead>
-                  <TableHead className="w-32 py-4 font-bold text-slate-700">Marks (1-10)</TableHead>
-                  <TableHead className="py-4 font-bold text-slate-700">AI Feedback Suggestion</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {students.map((student) => (
-                  <TableRow key={student.id} className="hover:bg-slate-50/50">
-                    <TableCell className="font-bold text-slate-900">{student.name}</TableCell>
-                    <TableCell className="text-slate-500 font-medium">{student.rollNo}</TableCell>
-                    <TableCell>
-                      <Select 
-                        value={entries[student.id].attendance} 
-                        onValueChange={(val: 'Present' | 'Absent') => setEntries({
-                          ...entries,
-                          [student.id]: { ...entries[student.id], attendance: val }
-                        })}
-                      >
-                        <SelectTrigger className="w-32 rounded-lg">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Present">Present</SelectItem>
-                          <SelectItem value="Absent">Absent</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell>
-                      <Input 
-                        type="number" 
-                        min="1" 
-                        max="10" 
-                        placeholder="0"
-                        className="rounded-lg h-10"
-                        value={entries[student.id].marks}
-                        onChange={(e) => setEntries({
-                          ...entries,
-                          [student.id]: { ...entries[student.id], marks: e.target.value }
-                        })}
-                        disabled={entries[student.id].attendance === 'Absent'}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 text-xs text-slate-400 italic font-medium">
-                          {entries[student.id].marks ? getAIFeedback(parseInt(entries[student.id].marks)) : 'Enter marks to see suggestion...'}
-                        </div>
-                        {entries[student.id].marks && (
-                          <Badge variant="outline" className="bg-indigo-50 text-indigo-600 border-indigo-100 cursor-pointer hover:bg-indigo-100 rounded-full px-3">
-                            Apply
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
+          {tasks.length === 0 ? (
+            <Card className="border-none shadow-sm rounded-[2.5rem] p-12 text-center bg-slate-50 border-slate-100">
+               <AlertCircle className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+               <h3 className="text-lg font-bold text-slate-800">No activities assigned</h3>
+               <p className="text-slate-500 mt-2 mb-6 text-sm">Create a new activity or assignment to start entering marks.</p>
+            </Card>
+          ) : (
+            <Card className="border-none shadow-sm overflow-hidden rounded-[2.5rem]">
+              <Table>
+                <TableHeader className="bg-slate-50/50">
+                  <TableRow>
+                    <TableHead className="py-4 font-bold text-slate-700">Student Name</TableHead>
+                    <TableHead className="py-4 font-bold text-slate-700">Roll Number</TableHead>
+                    <TableHead className="py-4 font-bold text-slate-700">Attendance</TableHead>
+                    <TableHead className="w-32 py-4 font-bold text-slate-700">Marks</TableHead>
+                    <TableHead className="py-4 font-bold text-slate-700">AI Feedback Suggestion</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Card>
+                </TableHeader>
+                <TableBody>
+                  {students.map((student) => (
+                    <TableRow key={student.id} className="hover:bg-slate-50/50">
+                      <TableCell className="font-bold text-slate-900">{student.name}</TableCell>
+                      <TableCell className="text-slate-500 font-medium">{student.rollNo}</TableCell>
+                      <TableCell>
+                        <Select 
+                          value={entries[student.id]?.attendance || 'Present'} 
+                          onValueChange={(val: 'Present' | 'Absent') => setEntries({
+                            ...entries,
+                            [student.id]: { ...entries[student.id], attendance: val }
+                          })}
+                        >
+                          <SelectTrigger className="w-32 rounded-lg">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Present">Present</SelectItem>
+                            <SelectItem value="Absent">Absent</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Input 
+                          type="number" 
+                          min="0" 
+                          placeholder="0"
+                          className="rounded-lg h-10"
+                          value={entries[student.id]?.marks || ''}
+                          onChange={(e) => setEntries({
+                            ...entries,
+                            [student.id]: { ...entries[student.id], marks: e.target.value }
+                          })}
+                          disabled={entries[student.id]?.attendance === 'Absent'}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 text-xs text-slate-400 italic font-medium">
+                            {entries[student.id]?.marks ? getAIFeedback(parseInt(entries[student.id].marks)) : 'Enter marks to see suggestion...'}
+                          </div>
+                          {entries[student.id]?.marks && (
+                            <Badge variant="outline" className="bg-indigo-50 text-indigo-600 border-indigo-100 cursor-pointer hover:bg-indigo-100 rounded-full px-3">
+                              Apply
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          )}
         </>
       ) : (
         <div className="space-y-6">
@@ -6982,6 +6801,104 @@ function ReportsView({ students }: { students: Student[] }) {
           </Card>
         </div>
       </div>
+    </motion.div>
+  );
+}
+
+function StudentResultsView({ student }: { student: Student }) {
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchSubmissions = async () => {
+      try {
+        const subs = await apiService.getSubmissionsByStudent(student.id);
+        setSubmissions(subs || []);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchSubmissions();
+  }, [student.id]);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="space-y-6 max-w-5xl mx-auto"
+    >
+      <div>
+        <h1 className="text-3xl font-bold text-slate-900">My Results</h1>
+        <p className="text-slate-500 mt-1">View your graded submissions and AI analysis.</p>
+      </div>
+
+      <Card className="border-none shadow-sm overflow-hidden rounded-[2.5rem]">
+        <Table>
+          <TableHeader className="bg-slate-50/50">
+            <TableRow>
+              <TableHead className="py-4 font-bold text-slate-700">Task Details</TableHead>
+              <TableHead className="py-4 font-bold text-slate-700">Submitted On</TableHead>
+              <TableHead className="py-4 font-bold text-slate-700">Score</TableHead>
+              <TableHead className="py-4 font-bold text-slate-700 text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={4} className="h-48 text-center text-slate-400">Loading your results...</TableCell>
+              </TableRow>
+            ) : submissions.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={4} className="h-48 text-center text-slate-400 italic">No evaluated submissions found.</TableCell>
+              </TableRow>
+            ) : (
+              submissions.map(sub => (
+                <TableRow key={sub.id} className="hover:bg-slate-50/50">
+                  <TableCell>
+                    <p className="font-bold text-slate-900">{sub.type}</p>
+                    <Badge variant="outline" className={cn(
+                      "mt-1 text-[9px] font-bold uppercase",
+                      sub.status === 'Auto-Evaluated' || sub.status === 'Graded' 
+                        ? "bg-emerald-50 text-emerald-600 border-emerald-100" 
+                        : "bg-amber-50 text-amber-600 border-amber-100"
+                    )}>
+                      {sub.status === 'Awaiting-Manual-Grading' ? 'Pending Review' : 'Evaluated'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs text-slate-500">
+                    {new Date(sub.submittedAt).toLocaleString()}
+                  </TableCell>
+                  <TableCell>
+                    {sub.status === 'Awaiting-Manual-Grading' ? (
+                      <span className="text-xs font-bold text-slate-400 italic">Pending...</span>
+                    ) : (
+                      <div className="flex items-end gap-1">
+                        <span className="text-lg font-black text-indigo-600">{sub.score}</span>
+                        <span className="text-xs font-bold text-slate-400 mb-1">/ {sub.totalMarks}</span>
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <SubmissionGradingDialog 
+                      sub={sub} 
+                      onGrade={() => {}} 
+                      readOnly={true}
+                      trigger={
+                        <Button variant="ghost" size="sm" className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 font-bold rounded-lg h-9">
+                          Review Answers <ChevronRight className="w-4 h-4 ml-1" />
+                        </Button>
+                      }
+                    />
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Card>
     </motion.div>
   );
 }
