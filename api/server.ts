@@ -423,7 +423,7 @@ app.use(express.json({ limit: '50mb' }));
       let user: any = null;
       let matchedRole: string = '';
 
-      if (isAdminLogin || role === 'admin' || role === 'staff') {
+      if (isAdminLogin || role === 'admin' || role === 'staff' || role === 'college') {
         const result = await pool.query("SELECT * FROM teachers WHERE username = $1 AND is_active = TRUE", [username]);
         if (result.rows.length > 0 && result.rows[0].password === password) {
           const row = result.rows[0];
@@ -431,10 +431,21 @@ app.use(express.json({ limit: '50mb' }));
           if (matchedRole === 'teacher') matchedRole = 'staff';
           user = mapTeacher(row);
         } else {
-          return res.status(401).json({ error: "Invalid credentials" });
+          return res.status(401).json({ error: "Invalid credentials for College/Teacher portal" });
+        }
+      } else if (role === 'student') {
+        const studentResult = await pool.query(
+          "SELECT * FROM students WHERE (username = $1 OR roll_no = $1) AND is_activated = TRUE AND is_registered = TRUE AND is_active = TRUE", 
+          [username]
+        );
+        if (studentResult.rows.length > 0 && studentResult.rows[0].password === password) {
+          matchedRole = 'student';
+          user = mapStudent(studentResult.rows[0]);
+        } else {
+          return res.status(401).json({ error: "Invalid credentials for Student portal" });
         }
       } else {
-        // Not admin login, check teachers first
+        // Fallback behavior if role is not passed (though our UI now passes it)
         const teacherResult = await pool.query("SELECT * FROM teachers WHERE username = $1 AND is_active = TRUE", [username]);
         if (teacherResult.rows.length > 0 && teacherResult.rows[0].password === password) {
           const row = teacherResult.rows[0];
@@ -442,7 +453,6 @@ app.use(express.json({ limit: '50mb' }));
           if (matchedRole === 'teacher') matchedRole = 'staff';
           user = mapTeacher(row);
         } else {
-          // Then check students
           const studentResult = await pool.query(
             "SELECT * FROM students WHERE (username = $1 OR roll_no = $1) AND is_activated = TRUE AND is_registered = TRUE AND is_active = TRUE", 
             [username]

@@ -17,7 +17,7 @@ const apiFetch = async (url: string, options: RequestInit = {}) => {
 };
 
 export const apiService = {
-  async login(credentials: { username: string; password: string; isAdminLogin?: boolean }) {
+  async login(credentials: { username: string; password: string; isAdminLogin?: boolean; role?: string | null }) {
     const res = await apiFetch('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

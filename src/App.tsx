@@ -399,7 +399,7 @@ function AppContent() {
     }
 
     try {
-      const result = await apiService.login({ username, password, isAdminLogin });
+      const result = await apiService.login({ username, password, isAdminLogin, role: selectedRole });
 
       if (result.success) {
         setIsLoggedIn(true);
