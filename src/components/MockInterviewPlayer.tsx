@@ -434,7 +434,8 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
     }
 
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
+    const isBrave = !!(navigator as any).brave;
+    if (!SR || isBrave) {
       setUseTextFallback(true);
       setIsListening(true);
       return;
@@ -475,7 +476,7 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
 
     recognition.onerror = (e: any) => {
       console.warn("Speech Recognition error:", e);
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'network' || e.error === 'audio-capture') {
         setUseTextFallback(true);
       }
       setIsListening(false);
