@@ -374,18 +374,33 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
       setTurns(newTurns);
 
       const isEnd = aiText.toLowerCase().includes('that concludes') || aiText.toLowerCase().includes('performance report');
-      await speak(aiText);
-      if (isEnd) {
-        localStorage.removeItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
-        endInterview(newTurns);
+      
+      if (useTextFallback) {
+        speak(aiText); // Non-blocking in text mode
+        if (isEnd) {
+          localStorage.removeItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
+          endInterview(newTurns);
+        } else {
+          startListening();
+        }
       } else {
-        startListening();
+        // safety timeout of 12 seconds in voice mode to prevent infinite hang
+        await Promise.race([
+          speak(aiText),
+          new Promise(resolve => setTimeout(resolve, 12000))
+        ]);
+        if (isEnd) {
+          localStorage.removeItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
+          endInterview(newTurns);
+        } else {
+          startListening();
+        }
       }
     } catch {
       toast.error('AI Response failed. Please retry.');
       setFailedTurnsState(updated);
     }
-  }, [questions, speak, endInterview, student.id, task.id]);
+  }, [questions, speak, endInterview, student.id, task.id, useTextFallback]);
 
   const retryAIResponse = async () => {
     if (!failedTurnsState) return;
@@ -398,12 +413,26 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
       setFailedTurnsState(null);
       
       const isEnd = aiText.toLowerCase().includes('that concludes') || aiText.toLowerCase().includes('performance report');
-      await speak(aiText);
-      if (isEnd) {
-        localStorage.removeItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
-        endInterview(newTurns);
+      
+      if (useTextFallback) {
+        speak(aiText);
+        if (isEnd) {
+          localStorage.removeItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
+          endInterview(newTurns);
+        } else {
+          startListening();
+        }
       } else {
-        startListening();
+        await Promise.race([
+          speak(aiText),
+          new Promise(resolve => setTimeout(resolve, 12000))
+        ]);
+        if (isEnd) {
+          localStorage.removeItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
+          endInterview(newTurns);
+        } else {
+          startListening();
+        }
       }
     } catch {
       toast.error('Connection issue. Retrying...');
@@ -516,9 +545,18 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
     const intro = `Hello ${student.name}! Welcome to your SAR AI mock interview. I'll be asking you ${questions.length} questions. Please speak clearly.${first ? ` Let's begin! ${first}` : ''}`;
     const introTurn: InterviewTurn = { role: 'ai', text: intro, timestamp: new Date().toISOString() };
     setTurns([introTurn]);
-    await speak(intro);
-    if (!interviewEndedRef.current) startListening();
-  }, [student.name, questions, speak, startListening]);
+    
+    if (useTextFallback) {
+      speak(intro);
+      if (!interviewEndedRef.current) startListening();
+    } else {
+      await Promise.race([
+        speak(intro),
+        new Promise(resolve => setTimeout(resolve, 12000))
+      ]);
+      if (!interviewEndedRef.current) startListening();
+    }
+  }, [student.name, questions, speak, startListening, useTextFallback]);
 
   const clearSessionAndStart = () => {
     localStorage.removeItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
