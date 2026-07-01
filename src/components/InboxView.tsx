@@ -126,7 +126,7 @@ export default function InboxView({ currentUser, userRole, students, teachers }:
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="h-[calc(100vh-180px)] flex flex-col gap-6"
+      className="flex-1 min-h-0 flex flex-col gap-6 h-full"
     >
       <div className="flex justify-between items-center">
         <div>

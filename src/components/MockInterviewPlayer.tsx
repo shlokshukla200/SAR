@@ -307,7 +307,7 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = setTimeout(() => {
         if (transcriptBuildRef.current.trim().length > 0) recognition.stop();
-      }, 3000);
+      }, 10000);
     };
 
     recognition.onend = async () => {
