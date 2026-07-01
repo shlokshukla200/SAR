@@ -505,10 +505,9 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
 
     recognition.onerror = (e: any) => {
       console.warn("Speech Recognition error:", e);
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'network' || e.error === 'audio-capture') {
-        setUseTextFallback(true);
-      }
-      setIsListening(false);
+      setUseTextFallback(true);
+      setIsListening(true);
+      toast.warning("Speech recognition issue detected. Switched to typing mode.");
     };
 
     setIsListening(true);
@@ -898,23 +897,35 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
 
           {/* Listening State Action Banner */}
           {isListening && !useTextFallback && (
-            <div className="flex justify-between items-center mt-3 pt-3 border-t border-white/5 shrink-0">
+            <div className="flex justify-between items-center mt-3 pt-3 border-t border-white/5 shrink-0 bg-white/5 px-4 py-3 rounded-2xl border border-white/10">
               <span className="text-[10px] text-emerald-400 font-bold animate-pulse flex items-center gap-1">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                Speech capturing active
+                Mic Active - Speak to respond
               </span>
-              <button
-                onClick={() => {
-                  if (transcriptBuildRef.current.trim().length > 0) {
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
                     recognitionRef.current?.stop();
-                  } else {
-                    toast.error("Nothing transcribed yet. Speak or switch to Text Mode in settings.");
-                  }
-                }}
-                className="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-black px-6 py-2 rounded-xl text-xs transition-colors shadow-lg shadow-cyan-500/25"
-              >
-                Submit Answer Now
-              </button>
+                    setUseTextFallback(true);
+                    setIsListening(true);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  Type Answer Instead
+                </button>
+                <button
+                  onClick={() => {
+                    if (transcriptBuildRef.current.trim().length > 0) {
+                      recognitionRef.current?.stop();
+                    } else {
+                      toast.error("Nothing transcribed yet. Speak or click 'Type Answer Instead'.");
+                    }
+                  }}
+                  className="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-black px-6 py-2 rounded-xl text-xs transition-colors shadow-lg shadow-cyan-500/25"
+                >
+                  Submit Answer Now
+                </button>
+              </div>
             </div>
           )}
 
