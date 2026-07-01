@@ -520,6 +520,28 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
     if (!interviewEndedRef.current) startListening();
   }, [student.name, questions, speak, startListening]);
 
+  const clearSessionAndStart = () => {
+    localStorage.removeItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
+    setResumePrompt(false);
+    startInterview();
+  };
+
+  const resumeSession = () => {
+    const saved = localStorage.getItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setTurns(parsed.turns);
+        setElapsedSeconds(parsed.elapsedSeconds || 0);
+        setPhase('running');
+        setResumePrompt(false);
+        setTimeout(() => {
+          startListening();
+        }, 500);
+      } catch (e) {}
+    }
+  };
+
   const toggleCamera = () => {
     streamRef.current?.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
     setIsVideoOn(v => !v);
