@@ -189,184 +189,207 @@ async function initializeDatabase() {
   if (!process.env.ADMIN_PASSWORD) {
     console.warn("WARNING: ADMIN_PASSWORD environment variable is missing! The admin account might be locked out. Please configure it in Vercel.");
   }
-  console.log("Checking and initializing PostgreSQL database schema...");
+  console.log("Checking and initializing database migrations...");
   try {
     const client = await pool.connect();
     try {
-      let isInitialized = false;
-      try {
-        await client.query("SELECT 1 FROM teachers LIMIT 1;");
-        isInitialized = true;
-      } catch (e) {}
-
-      await client.query("BEGIN;");
-
-      if (!isInitialized) {
-        // 1. Teachers table
+      // 1. Create migration tracker table if it doesn't exist
       await client.query(`
-        CREATE TABLE IF NOT EXISTS teachers (
-          id TEXT PRIMARY KEY,
-          employee_id TEXT,
-          username VARCHAR(100) UNIQUE NOT NULL,
-          password TEXT NOT NULL,
-          name VARCHAR(150) NOT NULL,
-          role VARCHAR(50) DEFAULT 'Teacher',
-          department TEXT,
-          contact_no TEXT,
-          email_id TEXT,
-          photo TEXT,
-          batch TEXT,
-          assigned_batches JSONB DEFAULT '[]'::jsonb,
-          performance_details JSONB DEFAULT '{}'::jsonb,
-          is_active BOOLEAN DEFAULT TRUE
+        CREATE TABLE IF NOT EXISTS database_migrations (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(255) UNIQUE NOT NULL,
+          executed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
       `);
 
-      // 2. Students table
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS students (
-          id TEXT PRIMARY KEY,
-          username VARCHAR(100) UNIQUE,
-          password TEXT,
-          is_activated BOOLEAN DEFAULT FALSE,
-          is_registered BOOLEAN DEFAULT FALSE,
-          name VARCHAR(150) NOT NULL,
-          roll_no VARCHAR(100) UNIQUE NOT NULL,
-          batch VARCHAR(100) NOT NULL,
-          branch VARCHAR(100) NOT NULL,
-          photo TEXT,
-          college_id TEXT,
-          section TEXT,
-          year TEXT,
-          pre_analysis JSONB DEFAULT '{}'::jsonb,
-          post_analysis JSONB DEFAULT '{}'::jsonb,
-          workshop_scores JSONB DEFAULT '[]'::jsonb,
-          teacher_id TEXT REFERENCES teachers(id) ON DELETE SET NULL,
-          personal_details JSONB DEFAULT '{}'::jsonb,
-          academic_details JSONB DEFAULT '{}'::jsonb,
-          alloted_activities JSONB DEFAULT '[]'::jsonb,
-          upcoming_sessions JSONB DEFAULT '[]'::jsonb,
-          is_active BOOLEAN DEFAULT TRUE
-        );
-      `);
+      // 2. Define migrations
+      const migrations = [
+        {
+          name: "001_initial_schema",
+          run: async () => {
+            // Create teachers table
+            await client.query(`
+              CREATE TABLE IF NOT EXISTS teachers (
+                id TEXT PRIMARY KEY,
+                employee_id TEXT,
+                username VARCHAR(100) UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                name VARCHAR(150) NOT NULL,
+                role VARCHAR(50) DEFAULT 'Teacher',
+                department TEXT,
+                contact_no TEXT,
+                email_id TEXT,
+                photo TEXT,
+                batch TEXT,
+                assigned_batches JSONB DEFAULT '[]'::jsonb,
+                performance_details JSONB DEFAULT '{}'::jsonb,
+                is_active BOOLEAN DEFAULT TRUE
+              );
+            `);
+            // Create students table
+            await client.query(`
+              CREATE TABLE IF NOT EXISTS students (
+                id TEXT PRIMARY KEY,
+                username VARCHAR(100) UNIQUE,
+                password TEXT,
+                is_activated BOOLEAN DEFAULT FALSE,
+                is_registered BOOLEAN DEFAULT FALSE,
+                name VARCHAR(150) NOT NULL,
+                roll_no VARCHAR(100) UNIQUE NOT NULL,
+                batch VARCHAR(100) NOT NULL,
+                branch VARCHAR(100) NOT NULL,
+                photo TEXT,
+                college_id TEXT,
+                section TEXT,
+                year TEXT,
+                pre_analysis JSONB DEFAULT '{}'::jsonb,
+                post_analysis JSONB DEFAULT '{}'::jsonb,
+                workshop_scores JSONB DEFAULT '[]'::jsonb,
+                teacher_id TEXT REFERENCES teachers(id) ON DELETE SET NULL,
+                personal_details JSONB DEFAULT '{}'::jsonb,
+                academic_details JSONB DEFAULT '{}'::jsonb,
+                alloted_activities JSONB DEFAULT '[]'::jsonb,
+                upcoming_sessions JSONB DEFAULT '[]'::jsonb,
+                is_active BOOLEAN DEFAULT TRUE
+              );
+            `);
+            // Create batches table
+            await client.query(`
+              CREATE TABLE IF NOT EXISTS batches (
+                batch_id TEXT PRIMARY KEY,
+                teacher_id TEXT REFERENCES teachers(id) ON DELETE SET NULL,
+                teacher_name TEXT,
+                is_setup_complete BOOLEAN DEFAULT FALSE,
+                student_count INTEGER DEFAULT 0,
+                updated_at TEXT,
+                status TEXT,
+                description TEXT,
+                is_active BOOLEAN DEFAULT TRUE
+              );
+            `);
+            // Create tasks table
+            await client.query(`
+              CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                teacher_id TEXT REFERENCES teachers(id) ON DELETE SET NULL,
+                teacher_name TEXT,
+                batch_id TEXT,
+                due_date TEXT,
+                description TEXT,
+                status TEXT DEFAULT 'Active',
+                created_at TEXT,
+                content JSONB DEFAULT '{}'::jsonb,
+                randomize BOOLEAN DEFAULT FALSE,
+                time_limit INTEGER,
+                is_active BOOLEAN DEFAULT TRUE
+              );
+            `);
+            // Create submissions table
+            await client.query(`
+              CREATE TABLE IF NOT EXISTS submissions (
+                id TEXT PRIMARY KEY,
+                task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+                student_id TEXT REFERENCES students(id) ON DELETE CASCADE,
+                student_name TEXT,
+                batch_id TEXT,
+                type TEXT,
+                submitted_at TEXT,
+                status TEXT,
+                score REAL,
+                total_marks INTEGER,
+                answers JSONB DEFAULT '[]'::jsonb,
+                attachment_url TEXT,
+                teacher_id TEXT REFERENCES teachers(id) ON DELETE SET NULL,
+                is_active BOOLEAN DEFAULT TRUE
+              );
+            `);
+            // Create audit logs
+            await client.query(`
+              CREATE TABLE IF NOT EXISTS audit_logs (
+                id TEXT PRIMARY KEY,
+                action TEXT,
+                performed_by TEXT,
+                timestamp TEXT,
+                is_active BOOLEAN DEFAULT TRUE
+              );
+            `);
+            // Create messages table
+            await client.query(`
+              CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                sender_id TEXT,
+                sender_name TEXT,
+                sender_role TEXT,
+                recipient_array JSONB DEFAULT '[]'::jsonb,
+                recipient_type TEXT,
+                batch_id TEXT,
+                text TEXT,
+                timestamp TEXT,
+                priority TEXT,
+                category TEXT,
+                read_by JSONB DEFAULT '[]'::jsonb,
+                is_active BOOLEAN DEFAULT TRUE
+              );
+            `);
+            // Create indexes
+            await client.query("CREATE INDEX IF NOT EXISTS idx_students_roll_no ON students(roll_no);");
+            await client.query("CREATE INDEX IF NOT EXISTS idx_students_username ON students(username);");
+            await client.query("CREATE INDEX IF NOT EXISTS idx_teachers_username ON teachers(username);");
+            await client.query("CREATE INDEX IF NOT EXISTS idx_students_batch ON students(batch);");
+            await client.query("CREATE INDEX IF NOT EXISTS idx_tasks_batch_id ON tasks(batch_id);");
+            await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_task_id ON submissions(task_id);");
+            await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_student_id ON submissions(student_id);");
+          }
+        },
+        {
+          name: "002_add_grading_mode_and_interview_columns",
+          run: async () => {
+            await client.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS grading_mode TEXT DEFAULT 'Auto-Evaluated';`);
+            await client.query(`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS submission_reason TEXT DEFAULT 'Normal Submission';`);
+            await client.query(`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS interview_report JSONB DEFAULT NULL;`);
+          }
+        },
+        {
+          name: "003_add_ai_usage_logs",
+          run: async () => {
+            await client.query(`
+              CREATE TABLE IF NOT EXISTS ai_usage_logs (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT,
+                endpoint TEXT,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                total_tokens INTEGER,
+                cost_estimate REAL,
+                timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+              );
+            `);
+          }
+        }
+      ];
 
-      // 3. Batches table
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS batches (
-          batch_id TEXT PRIMARY KEY,
-          teacher_id TEXT REFERENCES teachers(id) ON DELETE SET NULL,
-          teacher_name TEXT,
-          is_setup_complete BOOLEAN DEFAULT FALSE,
-          student_count INTEGER DEFAULT 0,
-          updated_at TEXT,
-          status TEXT,
-          description TEXT,
-          is_active BOOLEAN DEFAULT TRUE
-        );
-      `);
+      // 3. Execute migrations in sequence
+      for (const migration of migrations) {
+        const check = await client.query("SELECT 1 FROM database_migrations WHERE name = $1", [migration.name]);
+        if (check.rows.length === 0) {
+          console.log(`Running migration: ${migration.name}`);
+          await client.query("BEGIN;");
+          try {
+            await migration.run();
+            await client.query("INSERT INTO database_migrations (name) VALUES ($1)", [migration.name]);
+            await client.query("COMMIT;");
+            console.log(`Migration completed: ${migration.name}`);
+          } catch (err) {
+            await client.query("ROLLBACK;");
+            console.error(`Migration failed: ${migration.name}`, err);
+            throw err;
+          }
+        }
+      }
 
-      // 4. Tasks table
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS tasks (
-          id TEXT PRIMARY KEY,
-          type TEXT NOT NULL,
-          title TEXT NOT NULL,
-          teacher_id TEXT REFERENCES teachers(id) ON DELETE SET NULL,
-          teacher_name TEXT,
-          batch_id TEXT,
-          due_date TEXT,
-          description TEXT,
-          status TEXT DEFAULT 'Active',
-          created_at TEXT,
-          content JSONB DEFAULT '{}'::jsonb,
-          randomize BOOLEAN DEFAULT FALSE,
-          time_limit INTEGER,
-          grading_mode TEXT DEFAULT 'Auto-Evaluated',
-          is_active BOOLEAN DEFAULT TRUE
-        );
-      `);
-
-      await client.query(`
-        ALTER TABLE tasks ADD COLUMN IF NOT EXISTS grading_mode TEXT DEFAULT 'Auto-Evaluated';
-      `);
-
-      // 5. Submissions table
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS submissions (
-          id TEXT PRIMARY KEY,
-          task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
-          student_id TEXT REFERENCES students(id) ON DELETE CASCADE,
-          student_name TEXT,
-          batch_id TEXT,
-          type TEXT,
-          submitted_at TEXT,
-          status TEXT,
-          score REAL,
-          total_marks INTEGER,
-          answers JSONB DEFAULT '[]'::jsonb,
-          attachment_url TEXT,
-          teacher_id TEXT REFERENCES teachers(id) ON DELETE SET NULL,
-          submission_reason TEXT DEFAULT 'Normal Submission',
-          interview_report JSONB DEFAULT NULL,
-          is_active BOOLEAN DEFAULT TRUE
-        );
-      `);
-
-      await client.query(`
-        ALTER TABLE submissions ADD COLUMN IF NOT EXISTS submission_reason TEXT DEFAULT 'Normal Submission';
-      `);
-
-      await client.query(`
-        ALTER TABLE submissions ADD COLUMN IF NOT EXISTS interview_report JSONB DEFAULT NULL;
-      `);
-
-      // 6. Audit logs table
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS audit_logs (
-          id TEXT PRIMARY KEY,
-          action TEXT,
-          performed_by TEXT,
-          timestamp TEXT,
-          is_active BOOLEAN DEFAULT TRUE
-        );
-      `);
-
-      // 7. Messages table
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS messages (
-          id TEXT PRIMARY KEY,
-          sender_id TEXT,
-          sender_name TEXT,
-          sender_role TEXT,
-          recipient_array JSONB DEFAULT '[]'::jsonb,
-          recipient_type TEXT,
-          batch_id TEXT,
-          text TEXT,
-          timestamp TEXT,
-          priority TEXT,
-          category TEXT,
-          read_by JSONB DEFAULT '[]'::jsonb,
-          is_active BOOLEAN DEFAULT TRUE
-        );
-      `);
-
-      // Create B-Tree indexes for high-performance scale lookups
-      await client.query("CREATE INDEX IF NOT EXISTS idx_students_roll_no ON students(roll_no);");
-      await client.query("CREATE INDEX IF NOT EXISTS idx_students_username ON students(username);");
-      await client.query("CREATE INDEX IF NOT EXISTS idx_teachers_username ON teachers(username);");
-      await client.query("CREATE INDEX IF NOT EXISTS idx_students_batch ON students(batch);");
-      await client.query("CREATE INDEX IF NOT EXISTS idx_tasks_batch_id ON tasks(batch_id);");
-      await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_task_id ON submissions(task_id);");
-      await client.query("CREATE INDEX IF NOT EXISTS idx_submissions_student_id ON submissions(student_id);");
-    }
-
-    // Always-run migrations (safe for existing DBs)
-    await client.query(`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS submission_reason TEXT DEFAULT 'Normal Submission';`);
-    await client.query(`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS interview_report JSONB DEFAULT NULL;`);
-    await client.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS grading_mode TEXT DEFAULT 'Auto-Evaluated';`);
-
-    // Seed the default system administrator if it does not exist
-
+      // Seed the default system administrator if it does not exist
       const adminPassword = process.env.ADMIN_PASSWORD || 'password@admin';
       await client.query(`
         INSERT INTO teachers (id, employee_id, username, password, name, role, department, contact_no, email_id, batch, assigned_batches, performance_details)
@@ -374,16 +397,12 @@ async function initializeDatabase() {
         ON CONFLICT (username) DO NOTHING;
       `, [adminPassword]);
 
-      await client.query("COMMIT;");
-      console.log("Database tables initialized successfully and admin account seeded!");
-    } catch (err) {
-      await client.query("ROLLBACK;");
-      throw err;
+      console.log("Database initialized successfully!");
     } finally {
       client.release();
     }
   } catch (error) {
-    console.error("FATAL: Failed to initialize PostgreSQL database schema:", error);
+    console.error("FATAL: Failed to initialize database:", error);
   }
 }
 
@@ -403,27 +422,6 @@ app.use(async (req, res, next) => {
 });
 
 app.use(express.json({ limit: '50mb' }));
-
-  // AI Proxy endpoint
-  app.post("/api/ai/generate", async (req, res) => {
-    try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        return res.status(500).json({ error: "GEMINI_API_KEY environment variable is missing on the server." });
-      }
-      const ai = new GoogleGenAI({ apiKey });
-      const { model, contents, config } = req.body;
-      const response = await ai.models.generateContent({
-        model: model || "gemini-3-flash-preview",
-        contents,
-        config
-      });
-      res.json({ text: response.text });
-    } catch (error: any) {
-      console.error("AI Generation Error:", error);
-      res.status(500).json({ error: error.message || "Failed to generate AI content" });
-    }
-  });
 
   // Secure Login endpoint
   app.post("/api/login", async (req, res) => {
@@ -596,6 +594,159 @@ app.use(express.json({ limit: '50mb' }));
   };
 
   app.use(verifyToken);
+
+  // Prompt injection sanitizer
+  function sanitizeTranscript(text: string): string {
+    if (typeof text !== 'string') return text;
+    const jailbreakPhrases = [
+      /ignore previous instructions/gi,
+      /ignore all previous instructions/gi,
+      /system override/gi,
+      /you are now a/gi,
+      /developer mode/gi,
+      /ignore prompt/gi,
+      /new instructions/gi
+    ];
+    let sanitized = text;
+    for (const regex of jailbreakPhrases) {
+      sanitized = sanitized.replace(regex, "[Redacted Command]");
+    }
+    if (sanitized.length > 2000) {
+      sanitized = sanitized.substring(0, 2000) + "... [Truncated]";
+    }
+    return sanitized;
+  }
+
+  // Request Queue for Gemini Concurrency
+  class RequestQueue {
+    private activeCount = 0;
+    private maxConcurrency = 5;
+    private queue: (() => void)[] = [];
+
+    async run<T>(fn: () => Promise<T>): Promise<T> {
+      if (this.activeCount >= this.maxConcurrency) {
+        await new Promise<void>(resolve => this.queue.push(resolve));
+      }
+      this.activeCount++;
+      try {
+        return await fn();
+      } finally {
+        this.activeCount--;
+        if (this.queue.length > 0) {
+          const next = this.queue.shift();
+          if (next) next();
+        }
+      }
+    }
+  }
+  const aiQueue = new RequestQueue();
+
+  // Gemini Cache
+  const promptCache = new Map<string, { text: string; expiresAt: number }>();
+
+  // In-Memory Rate Limiting
+  const rateLimits = new Map<string, { count: number; resetAt: number }>();
+  function aiRateLimitMiddleware(req: any, res: any, next: any) {
+    const userId = req.user?.id || req.ip;
+    const now = Date.now();
+    const limitWindowMs = 60 * 1000;
+    const maxRequests = 15;
+
+    const limit = rateLimits.get(userId);
+    if (!limit || now > limit.resetAt) {
+      rateLimits.set(userId, { count: 1, resetAt: now + limitWindowMs });
+      return next();
+    }
+
+    if (limit.count >= maxRequests) {
+      return res.status(429).json({ error: "Too many AI requests. Please wait a minute and try again." });
+    }
+
+    limit.count++;
+    next();
+  }
+
+  // Secure AI Proxy endpoint
+  app.post("/api/ai/generate", aiRateLimitMiddleware, async (req: any, res: any) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "GEMINI_API_KEY environment variable is missing on the server." });
+      }
+
+      const { model, contents, config } = req.body;
+
+      // Sanitize user inputs to prevent prompt injection
+      let sanitizedContents = contents;
+      if (Array.isArray(contents)) {
+        sanitizedContents = contents.map((msg: any) => {
+          if (msg.role === 'user' && Array.isArray(msg.parts)) {
+            return {
+              ...msg,
+              parts: msg.parts.map((p: any) => {
+                if (p.text) {
+                  return { ...p, text: sanitizeTranscript(p.text) };
+                }
+                return p;
+              })
+            };
+          }
+          return msg;
+        });
+      }
+
+      // Check Cache for question generation
+      const promptString = typeof sanitizedContents === 'string' ? sanitizedContents : JSON.stringify(sanitizedContents);
+      const isQuestionGen = promptString.includes("Generate") && promptString.includes("mock interview questions");
+
+      if (isQuestionGen) {
+        const cached = promptCache.get(promptString);
+        if (cached && cached.expiresAt > Date.now()) {
+          console.log("Serving mock interview questions from cache");
+          return res.json({ text: cached.text, cached: true });
+        }
+      }
+
+      // Run through Concurrency Queue
+      const responseText = await aiQueue.run(async () => {
+        const ai = new GoogleGenAI({ apiKey });
+        const response = await ai.models.generateContent({
+          model: model || "gemini-3-flash-preview",
+          contents: sanitizedContents,
+          config
+        });
+
+        // Log usage metadata (and console)
+        const usage = (response as any).usageMetadata || {};
+        const promptTokens = usage.promptTokenCount || 0;
+        const completionTokens = usage.candidatesTokenCount || 0;
+        const totalTokens = usage.totalTokenCount || 0;
+        const costEstimate = (promptTokens * 0.075 + completionTokens * 0.3) / 1000000;
+
+        try {
+          await pool.query(`
+            INSERT INTO ai_usage_logs (user_id, endpoint, prompt_tokens, completion_tokens, total_tokens, cost_estimate)
+            VALUES ($1, '/api/ai/generate', $2, $3, $4, $5)
+          `, [req.user?.id || 'anonymous', promptTokens, completionTokens, totalTokens, costEstimate]);
+        } catch (dbErr) {
+          console.error("Failed to log AI usage to DB:", dbErr);
+        }
+
+        return response.text;
+      });
+
+      // Save to Cache if it was a question generation
+      if (isQuestionGen && responseText) {
+        promptCache.set(promptString, { text: responseText, expiresAt: Date.now() + 24 * 60 * 60 * 1000 });
+      }
+
+      res.json({ text: responseText });
+    } catch (error: any) {
+      console.error("AI Generation Error:", error);
+      res.status(500).json({ error: error.message || "Failed to generate AI content" });
+    }
+  });
+
 
 
   // Students endpoint: save (create or update) students
@@ -867,6 +1018,24 @@ app.use(express.json({ limit: '50mb' }));
       const sub = req.body;
       if (!sub.id) {
         return res.status(400).json({ error: "submission id is required" });
+      }
+
+      // Server-side validation of interview_report shape
+      if (sub.type === 'MockInterview' && sub.interviewReport) {
+        const report = sub.interviewReport;
+        if (
+          typeof report !== 'object' ||
+          typeof report.fluency !== 'number' ||
+          typeof report.confidence !== 'number' ||
+          typeof report.vocabulary !== 'number' ||
+          typeof report.clarity !== 'number' ||
+          typeof report.overallScore !== 'number' ||
+          typeof report.summary !== 'string' ||
+          !Array.isArray(report.questionAnalysis) ||
+          !Array.isArray(report.recommendations)
+        ) {
+          return res.status(400).json({ error: "Invalid interview report format" });
+        }
       }
 
       await pool.query(`

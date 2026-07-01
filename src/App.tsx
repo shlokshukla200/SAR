@@ -235,6 +235,90 @@ const generateProfessionalPDF = (testContent: MockTestContent) => {
   return doc;
 };
 
+const generateInterviewPDF = (report: any, studentName: string, interviewTitle: string) => {
+  const doc = new jsPDF();
+  
+  // Header
+  doc.setFontSize(22);
+  doc.setTextColor(20, 30, 80);
+  doc.text("SAR PORTAL - MOCK INTERVIEW REPORT", 105, 20, { align: "center" });
+  
+  doc.setFontSize(14);
+  doc.setTextColor(100, 100, 100);
+  doc.text(`Candidate: ${studentName}`, 20, 35);
+  doc.text(`Interview: ${interviewTitle}`, 20, 42);
+  doc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 49);
+  
+  doc.setLineWidth(0.5);
+  doc.line(20, 54, 190, 54);
+
+  // Scores
+  doc.setFontSize(12);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont("helvetica", "bold");
+  doc.text(`Overall Score: ${report.overallScore} / 10`, 20, 64);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Fluency: ${report.fluency} / 10`, 20, 71);
+  doc.text(`Confidence: ${report.confidence} / 10`, 20, 78);
+  doc.text(`Vocabulary: ${report.vocabulary} / 10`, 110, 71);
+  doc.text(`Clarity: ${report.clarity} / 10`, 110, 78);
+
+  doc.line(20, 85, 190, 85);
+
+  // Summary
+  doc.setFont("helvetica", "bold");
+  doc.text("Performance Summary:", 20, 95);
+  doc.setFont("helvetica", "normal");
+  const summaryLines = doc.splitTextToSize(report.summary || '', 170);
+  doc.text(summaryLines, 20, 102);
+
+  let yOffset = 102 + (summaryLines.length * 6) + 10;
+
+  // Recommendations
+  if (yOffset > 250) {
+    doc.addPage();
+    yOffset = 20;
+  }
+  doc.setFont("helvetica", "bold");
+  doc.text("Recommendations for Improvement:", 20, yOffset);
+  doc.setFont("helvetica", "normal");
+  yOffset += 7;
+  
+  const recs = report.recommendations || [];
+  recs.forEach((rec: string, index: number) => {
+    const recLines = doc.splitTextToSize(`${index + 1}. ${rec}`, 170);
+    doc.text(recLines, 20, yOffset);
+    yOffset += recLines.length * 6;
+  });
+
+  // Question Analysis
+  yOffset += 10;
+  const analysis = report.questionAnalysis || [];
+  analysis.forEach((qa: any, index: number) => {
+    if (yOffset > 220) {
+      doc.addPage();
+      yOffset = 20;
+    }
+    
+    doc.setFont("helvetica", "bold");
+    doc.text(`Question ${index + 1}: ${qa.question}`, 20, yOffset);
+    doc.text(`Score: ${qa.score}/10`, 190, yOffset, { align: "right" });
+    yOffset += 6;
+    
+    doc.setFont("helvetica", "italic");
+    const ansLines = doc.splitTextToSize(`Student Answer: "${qa.studentAnswer || 'No response recorded'}"`, 170);
+    doc.text(ansLines, 20, yOffset);
+    yOffset += (ansLines.length * 6) + 2;
+    
+    doc.setFont("helvetica", "normal");
+    const feedbackLines = doc.splitTextToSize(`Feedback: ${qa.feedback}`, 170);
+    doc.text(feedbackLines, 20, yOffset);
+    yOffset += (feedbackLines.length * 6) + 8;
+  });
+
+  doc.save(`${studentName.replace(/\s+/g, '_')}_Mock_Interview_Report.pdf`);
+};
+
 export default function App() {
   return (
     // @ts-ignore
@@ -5915,6 +5999,80 @@ function SubmissionGradingDialog({
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Mock Interview Evaluation Details */}
+          {sub.type === 'MockInterview' && sub.interviewReport && (
+            <div className="space-y-4">
+              <h4 className="font-black text-slate-850 flex items-center justify-between border-b pb-2">
+                <div className="flex items-center gap-2">
+                  <Award className="w-5 h-5 text-indigo-600" />
+                  AI Interview Evaluation Report
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="rounded-xl font-bold border-indigo-250 text-indigo-600 h-9 px-4 flex items-center gap-1.5 hover:bg-indigo-50"
+                  onClick={() => {
+                    generateInterviewPDF(sub.interviewReport, sub.studentName, task?.title || 'Mock Interview');
+                  }}
+                >
+                  <Download className="w-4 h-4" /> Export Report (PDF)
+                </Button>
+              </h4>
+
+              <div className="grid grid-cols-4 gap-4 p-6 bg-slate-50 border border-slate-100 rounded-3xl">
+                <div className="text-center bg-white p-4 rounded-2xl border shadow-sm flex flex-col items-center">
+                  <span className="text-xl font-black text-slate-900">{sub.interviewReport.fluency}/10</span>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase mt-1">Fluency</span>
+                </div>
+                <div className="text-center bg-white p-4 rounded-2xl border shadow-sm flex flex-col items-center">
+                  <span className="text-xl font-black text-slate-900">{sub.interviewReport.confidence}/10</span>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase mt-1">Confidence</span>
+                </div>
+                <div className="text-center bg-white p-4 rounded-2xl border shadow-sm flex flex-col items-center">
+                  <span className="text-xl font-black text-slate-900">{sub.interviewReport.vocabulary}/10</span>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase mt-1">Vocabulary</span>
+                </div>
+                <div className="text-center bg-white p-4 rounded-2xl border shadow-sm flex flex-col items-center">
+                  <span className="text-xl font-black text-slate-900">{sub.interviewReport.clarity}/10</span>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase mt-1">Clarity</span>
+                </div>
+              </div>
+
+              <div className="p-5 bg-indigo-50/50 rounded-2xl border border-indigo-100/50 text-left">
+                <h5 className="text-xs font-black text-indigo-800 uppercase tracking-wider mb-2">✦ Performance Summary</h5>
+                <p className="text-slate-700 text-sm leading-relaxed">{sub.interviewReport.summary}</p>
+              </div>
+
+              <div className="space-y-3">
+                <h5 className="text-sm font-black text-slate-800 text-left">Question-by-Question Log</h5>
+                <div className="space-y-3 max-h-[30vh] overflow-y-auto pr-2">
+                  {sub.interviewReport.questionAnalysis.map((qa: any, idx: number) => (
+                    <div key={idx} className="p-4 bg-white border border-slate-100 rounded-2xl shadow-sm text-left space-y-2">
+                      <div className="flex justify-between items-center text-xs font-bold">
+                        <span className="text-indigo-650 font-black">Q{idx + 1}: {qa.question}</span>
+                        <Badge className="bg-slate-100 text-slate-700 rounded-full text-[10px]">{qa.score || 0}/10</Badge>
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded-xl">
+                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Student Answer</p>
+                        <p className="text-xs text-slate-700 italic">"{qa.studentAnswer || 'No response recorded'}"</p>
+                      </div>
+                      <p className="text-xs text-slate-500">{qa.feedback}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-5 bg-purple-50/50 rounded-2xl border border-purple-100/50 text-left space-y-2">
+                <h5 className="text-xs font-black text-purple-800 uppercase tracking-wider">Recommendations for Improvement</h5>
+                <ul className="list-decimal pl-4 text-xs text-slate-700 space-y-1">
+                  {sub.interviewReport.recommendations.map((rec: string, idx: number) => (
+                    <li key={idx}>{rec}</li>
+                  ))}
+                </ul>
               </div>
             </div>
           )}

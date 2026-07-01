@@ -14,7 +14,7 @@ interface MockInterviewPlayerProps {
   onBack: () => void;
 }
 
-function AudioWaveform({ mode, stream }: { mode: 'ai' | 'user' | 'standby', stream: MediaStream | null }) {
+function AudioWaveform({ mode, stream, onVolumeUpdate }: { mode: 'ai' | 'user' | 'standby', stream: MediaStream | null, onVolumeUpdate?: (rms: number) => void }) {
   const barsCount = 40;
   const [dataArray, setDataArray] = useState<Uint8Array>(new Uint8Array(barsCount));
   const requestRef = useRef<number>();
@@ -29,9 +29,23 @@ function AudioWaveform({ mode, stream }: { mode: 'ai' | 'user' | 'standby', stre
         source.connect(analyser);
 
         const data = new Uint8Array(analyser.frequencyBinCount);
+        const timeData = new Uint8Array(analyser.fftSize);
 
         const update = () => {
           analyser.getByteFrequencyData(data);
+          
+          // Calculate RMS for silence backup detection
+          analyser.getByteTimeDomainData(timeData);
+          let sum = 0;
+          for (let i = 0; i < timeData.length; i++) {
+            const val = (timeData[i] - 128) / 128;
+            sum += val * val;
+          }
+          const rms = Math.sqrt(sum / timeData.length);
+          if (onVolumeUpdate) {
+            onVolumeUpdate(rms);
+          }
+
           const sliced = new Uint8Array(barsCount);
           for (let i = 0; i < barsCount; i++) {
              sliced[i] = data[i]; 
@@ -55,7 +69,7 @@ function AudioWaveform({ mode, stream }: { mode: 'ai' | 'user' | 'standby', stre
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
       setDataArray(new Uint8Array(barsCount));
     }
-  }, [mode, stream]);
+  }, [mode, stream, onVolumeUpdate]);
 
   return (
     <div className="flex items-center justify-center gap-[3px] h-16">
@@ -162,6 +176,15 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
   const [camError, setCamError] = useState(false);
   const [browserSupported, setBrowserSupported] = useState(true);
 
+  // Hardening State variables
+  const [useTextFallback, setUseTextFallback] = useState(false);
+  const [textAnswer, setTextAnswer] = useState('');
+  const [silenceTimeoutSetting, setSilenceTimeoutSetting] = useState(10); // in seconds
+  const [showSettings, setShowSettings] = useState(false);
+  const [failedTurnsState, setFailedTurnsState] = useState<InterviewTurn[] | null>(null);
+  const [isRetryingResponse, setIsRetryingResponse] = useState(false);
+  const [resumePrompt, setResumePrompt] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -171,6 +194,9 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
   const transcriptBuildRef = useRef('');
   const interviewEndedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  
+  const questionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastActiveTimeRef = useRef<number>(Date.now());
 
   useEffect(() => { turnsRef.current = turns; }, [turns]);
   useEffect(() => { interviewEndedRef.current = interviewEnded; }, [interviewEnded]);
@@ -181,8 +207,37 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
 
   useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR || !window.speechSynthesis) setBrowserSupported(false);
+    const hasSynthesis = !!window.speechSynthesis;
+    if (!hasSynthesis) {
+      setBrowserSupported(false);
+    }
+    if (!SR) {
+      setUseTextFallback(true);
+    }
   }, []);
+
+  // Session recovery check
+  useEffect(() => {
+    const saved = localStorage.getItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.turns && parsed.turns.length > 0) {
+          setResumePrompt(true);
+        }
+      } catch (e) {}
+    }
+  }, [student.id, task.id]);
+
+  // Persist session progress
+  useEffect(() => {
+    if (phase === 'running' && turns.length > 0) {
+      localStorage.setItem(
+        `sar_mock_interview_progress_${student.id}_${task.id}`,
+        JSON.stringify({ turns, elapsedSeconds })
+      );
+    }
+  }, [turns, elapsedSeconds, phase, student.id, task.id]);
 
   useEffect(() => {
     if (phase === 'running') {
@@ -282,10 +337,96 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
     }
   }, [questions, student, task]);
 
+  const submitAnswer = useCallback(async (answer: string) => {
+    if (interviewEndedRef.current) return;
+    setIsListening(false);
+    
+    if (questionTimeoutRef.current) clearTimeout(questionTimeoutRef.current);
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+
+    if (!answer) {
+      startListening();
+      return;
+    }
+
+    const studentTurn: InterviewTurn = { role: 'student', text: answer, timestamp: new Date().toISOString() };
+    const updated = [...turnsRef.current, studentTurn];
+    setTurns(updated);
+    setCurrentTranscript('');
+    setTextAnswer('');
+
+    try {
+      const aiText = await aiInterviewService.getAIResponse(updated, questions);
+      const aiTurn: InterviewTurn = { role: 'ai', text: aiText, timestamp: new Date().toISOString() };
+      const newTurns = [...updated, aiTurn];
+      setTurns(newTurns);
+
+      const isEnd = aiText.toLowerCase().includes('that concludes') || aiText.toLowerCase().includes('performance report');
+      await speak(aiText);
+      if (isEnd) {
+        localStorage.removeItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
+        endInterview(newTurns);
+      } else {
+        startListening();
+      }
+    } catch {
+      toast.error('AI Response failed. Please retry.');
+      setFailedTurnsState(updated);
+    }
+  }, [questions, speak, endInterview, student.id, task.id]);
+
+  const retryAIResponse = async () => {
+    if (!failedTurnsState) return;
+    setIsRetryingResponse(true);
+    try {
+      const aiText = await aiInterviewService.getAIResponse(failedTurnsState, questions);
+      const aiTurn: InterviewTurn = { role: 'ai', text: aiText, timestamp: new Date().toISOString() };
+      const newTurns = [...failedTurnsState, aiTurn];
+      setTurns(newTurns);
+      setFailedTurnsState(null);
+      
+      const isEnd = aiText.toLowerCase().includes('that concludes') || aiText.toLowerCase().includes('performance report');
+      await speak(aiText);
+      if (isEnd) {
+        localStorage.removeItem(`sar_mock_interview_progress_${student.id}_${task.id}`);
+        endInterview(newTurns);
+      } else {
+        startListening();
+      }
+    } catch {
+      toast.error('Connection issue. Retrying...');
+    } finally {
+      setIsRetryingResponse(false);
+    }
+  };
+
   const startListening = useCallback(() => {
     if (interviewEndedRef.current) return;
+    setFailedTurnsState(null);
+
+    // Save progress to LocalStorage
+    localStorage.setItem(
+      `sar_mock_interview_progress_${student.id}_${task.id}`,
+      JSON.stringify({ turns: turnsRef.current, elapsedSeconds })
+    );
+
+    if (useTextFallback) {
+      setIsListening(true);
+      setCurrentTranscript('');
+      setTextAnswer('');
+      if (questionTimeoutRef.current) clearTimeout(questionTimeoutRef.current);
+      questionTimeoutRef.current = setTimeout(() => {
+        toast.warning("Answer timeout reached. Please type and submit your response.");
+      }, 180000);
+      return;
+    }
+
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return;
+    if (!SR) {
+      setUseTextFallback(true);
+      setIsListening(true);
+      return;
+    }
 
     const recognition = new SR();
     recognition.continuous = true;
@@ -293,6 +434,7 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
     recognition.lang = 'en-US';
     recognitionRef.current = recognition;
     transcriptBuildRef.current = '';
+    lastActiveTimeRef.current = Date.now();
 
     recognition.onresult = (event: any) => {
       let final = '';
@@ -303,50 +445,59 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
       }
       if (final) transcriptBuildRef.current += final + ' ';
       setCurrentTranscript(transcriptBuildRef.current + interim);
+      lastActiveTimeRef.current = Date.now();
 
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = setTimeout(() => {
-        if (transcriptBuildRef.current.trim().length > 0) recognition.stop();
-      }, 10000);
+        if (transcriptBuildRef.current.trim().length > 0) {
+          recognition.stop();
+        }
+      }, silenceTimeoutSetting * 1000);
     };
 
-    recognition.onend = async () => {
+    recognition.onend = () => {
       if (interviewEndedRef.current) return;
-      setIsListening(false);
       const answer = transcriptBuildRef.current.trim();
-
-      if (!answer) {
-        startListening();
-        return;
-      }
-
-      const studentTurn: InterviewTurn = { role: 'student', text: answer, timestamp: new Date().toISOString() };
-      const updated = [...turnsRef.current, studentTurn];
-      setTurns(updated);
-      setCurrentTranscript('');
-
-      try {
-        const aiText = await aiInterviewService.getAIResponse(updated, questions);
-        const aiTurn: InterviewTurn = { role: 'ai', text: aiText, timestamp: new Date().toISOString() };
-        const newTurns = [...updated, aiTurn];
-        setTurns(newTurns);
-
-        const isEnd = aiText.toLowerCase().includes('that concludes') || aiText.toLowerCase().includes('performance report');
-        await speak(aiText);
-        if (isEnd) endInterview(newTurns);
-        else startListening();
-      } catch {
-        toast.error('Connection issue. Retrying...');
-        startListening();
-      }
+      submitAnswer(answer);
     };
 
-    recognition.onerror = () => setIsListening(false);
+    recognition.onerror = (e: any) => {
+      console.warn("Speech Recognition error:", e);
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        setUseTextFallback(true);
+      }
+      setIsListening(false);
+    };
+
     setIsListening(true);
-    recognition.start();
-  }, [questions, speak, endInterview]);
+    try {
+      recognition.start();
+      
+      // Hard timeout (3 minutes)
+      if (questionTimeoutRef.current) clearTimeout(questionTimeoutRef.current);
+      questionTimeoutRef.current = setTimeout(() => {
+        if (recognitionRef.current) {
+          toast.warning("Answer timeout reached (3 minutes). Submitting response.");
+          recognitionRef.current.stop();
+        }
+      }, 180000);
+    } catch (err) {
+      console.error("Speech recognition start failed:", err);
+      setUseTextFallback(true);
+    }
+  }, [questions, useTextFallback, silenceTimeoutSetting, student.id, task.id, elapsedSeconds, submitAnswer]);
 
   const startInterview = useCallback(async () => {
+    // Resume AudioContext for Safari/iOS
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+    } catch (e) {
+      console.warn("AudioContext resume failed:", e);
+    }
+
     setPhase('running');
     const first = questions[0]?.question;
     const intro = `Hello ${student.name}! Welcome to your SAR AI mock interview. I'll be asking you ${questions.length} questions. Please speak clearly.${first ? ` Let's begin! ${first}` : ''}`;
@@ -514,77 +665,233 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
   }
 
   // Main interview UI
+  const handleVolumeUpdate = useCallback((rms: number) => {
+    const noiseFloor = 0.015;
+    if (rms > noiseFloor) {
+      lastActiveTimeRef.current = Date.now();
+    } else {
+      const silenceDuration = Date.now() - lastActiveTimeRef.current;
+      if (silenceDuration > silenceTimeoutSetting * 1000) {
+        if (isListening && !useTextFallback && transcriptBuildRef.current.trim().length > 0) {
+          console.log("RMS silence threshold met, stopping recognition");
+          recognitionRef.current?.stop();
+        }
+      }
+    }
+  }, [isListening, silenceTimeoutSetting, useTextFallback]);
+
+  if (resumePrompt) {
+    return (
+      <div className="fixed inset-0 bg-[#0a0f1e] flex items-center justify-center z-50 p-8">
+        <StarField />
+        <div className="relative z-10 text-center max-w-md w-full bg-slate-900/80 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-md shadow-2xl">
+          <svg className="w-16 h-16 text-cyan-400 mx-auto mb-6 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          <h2 className="text-white text-2xl font-bold mb-3">Resume Interview?</h2>
+          <p className="text-white/60 mb-8 text-sm">We found an active, incomplete interview session for this activity. Would you like to resume where you left off?</p>
+          <div className="flex gap-4 justify-center">
+            <button onClick={clearSessionAndStart} className="px-6 py-3 rounded-2xl border border-white/20 text-white/60 font-bold hover:bg-white/5 transition-colors text-xs">Start Over</button>
+            <button onClick={resumeSession} className="px-8 py-3 rounded-2xl bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-black text-xs transition-colors shadow-lg shadow-cyan-500/25">Resume Session</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Main interview UI
   return (
-    <div className="fixed inset-0 bg-[#0a0f1e] flex flex-col z-50 select-none">
+    <div className="fixed inset-0 bg-[#0a0f1e] flex flex-col z-50 select-none overflow-y-auto md:overflow-hidden">
       <StarField />
       {/* Top bar */}
-      <div className="relative z-10 flex items-center justify-between px-8 py-4">
+      <div className="relative z-10 flex items-center justify-between px-8 py-4 border-b border-white/5 bg-[#0a0f1e]/80 backdrop-blur-md">
         <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md rounded-full px-4 py-2">
           <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="text-white font-bold text-sm">{formatTime(elapsedSeconds)}</span>
         </div>
-        <div className="text-center">
+        <div className="text-center flex items-center gap-2">
+          {useTextFallback && (
+            <span className="bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[10px] px-2 py-0.5 rounded-full font-bold">Text Mode</span>
+          )}
           <span className="text-white/30 text-xs font-bold uppercase tracking-widest">
             {isAiSpeaking ? 'SAR AI Speaking...' : isListening ? 'Listening...' : 'Processing...'}
           </span>
         </div>
-        <button
-          onClick={() => endInterview()}
-          className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-6 py-2 rounded-full transition-colors text-sm shadow-lg"
-        >
-          End Interview
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="p-2 rounded-xl bg-white/5 text-white/70 hover:text-white hover:bg-white/10 border border-white/10 transition-colors"
+            title="Settings"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+          </button>
+          <button
+            onClick={() => endInterview()}
+            className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-6 py-2 rounded-full transition-colors text-sm shadow-lg shadow-rose-600/20"
+          >
+            End Interview
+          </button>
+        </div>
       </div>
 
+      {/* Settings Dialog Overlay */}
+      {showSettings && (
+        <div className="absolute top-20 right-8 z-50 w-72 bg-slate-900 border border-white/10 rounded-2xl p-6 shadow-2xl text-white">
+          <h3 className="font-bold text-sm mb-4 border-b border-white/10 pb-2">Silence Detection Settings</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] text-white/50 uppercase font-bold tracking-wider block mb-2">Silence Timeout ({silenceTimeoutSetting}s)</label>
+              <input
+                type="range" min="5" max="25" step="5"
+                value={silenceTimeoutSetting}
+                onChange={e => setSilenceTimeoutSetting(parseInt(e.target.value))}
+                className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+              />
+              <span className="text-[9px] text-white/40 block mt-1">Adjust silence timing threshold.</span>
+            </div>
+            <div className="pt-2 border-t border-white/10 flex justify-between items-center text-xs">
+              <span>Text Input Mode</span>
+              <input
+                type="checkbox"
+                checked={useTextFallback}
+                onChange={e => setUseTextFallback(e.target.checked)}
+                className="w-4.5 h-4.5 rounded border-white/20 accent-cyan-400 cursor-pointer"
+              />
+            </div>
+            <button
+              onClick={() => setShowSettings(false)}
+              className="w-full py-2 bg-white/10 hover:bg-white/20 rounded-xl font-bold text-xs transition-colors mt-2"
+            >
+              Close Settings
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main content */}
-      <div className="relative z-10 flex-1 flex gap-8 px-8 py-4 min-h-0">
+      <div className="relative z-10 flex-1 flex flex-col md:flex-row gap-6 px-6 py-4 min-h-0">
         {/* Left: conversation */}
-        <div className="flex-1 flex flex-col min-h-0">
-          <motion.h1 className="text-5xl font-black text-center mb-6 tracking-tight"
+        <div className="flex-1 flex flex-col min-h-0 bg-white/5 border border-white/10 rounded-[2.5rem] p-6 shadow-xl">
+          <motion.h1 className="text-3xl font-black text-center mb-4 tracking-tight"
             animate={{ opacity: [0.7, 1, 0.7] }} transition={{ duration: 3, repeat: Infinity }}>
             <span className="text-white">SAR </span>
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">AI</span>
           </motion.h1>
-          <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-4 scrollbar-hide pr-2">
+
+          {/* Current Question Caption Block (a11y visible captions) */}
+          {turns.length > 0 && (
+            <div className="bg-gradient-to-r from-indigo-950/80 to-slate-900/80 border border-cyan-500/10 rounded-3xl p-4 mb-4 relative overflow-hidden shrink-0 shadow-lg">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-400/5 rounded-full blur-2xl" />
+              <p className="text-[9px] text-cyan-400 font-bold uppercase tracking-widest mb-1">Current Spoken Question</p>
+              <h3 className="text-white font-medium text-xs leading-relaxed">
+                {turns.filter(t => t.role === 'ai').slice(-1)[0]?.text || "Initializing..."}
+              </h3>
+            </div>
+          )}
+
+          <div ref={scrollRef} aria-live="polite" className="flex-1 overflow-y-auto space-y-4 scrollbar-hide pr-2">
             <AnimatePresence initial={false}>
               {turns.map((turn, i) => (
                 <motion.div key={i} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                   className={`flex items-start gap-3 ${turn.role === 'student' ? 'flex-row-reverse' : ''}`}>
                   {turn.role === 'ai' ? (
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center shrink-0">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center shrink-0 border border-cyan-400/25">
                       <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
                     </div>
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                    <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0 border border-white/10">
                       <User className="w-4 h-4 text-white" />
                     </div>
                   )}
                   <div>
-                    <p className={`text-[11px] font-bold mb-1 ${turn.role === 'ai' ? 'text-cyan-400' : 'text-white/50'}`}>
+                    <p className={`text-[10px] font-bold mb-1 ${turn.role === 'ai' ? 'text-cyan-400' : 'text-white/50'}`}>
                       {turn.role === 'ai' ? '✦ SAR AI' : 'You'}
                     </p>
-                    <div className={`rounded-2xl px-5 py-3 max-w-xs md:max-w-sm text-sm leading-relaxed ${
-                      turn.role === 'ai' ? 'bg-white/10 text-white' : 'bg-blue-600/80 text-white'
+                    <div className={`rounded-2xl px-5 py-3 max-w-xs md:max-w-sm text-xs leading-relaxed ${
+                      turn.role === 'ai' ? 'bg-white/5 border border-white/10 text-white' : 'bg-blue-600/80 text-white'
                     }`}>{turn.text}</div>
                   </div>
                 </motion.div>
               ))}
             </AnimatePresence>
+
             {isListening && currentTranscript && (
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="flex items-start gap-3 flex-row-reverse">
-                <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0"><User className="w-4 h-4 text-white" /></div>
+                <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center shrink-0"><User className="w-4 h-4 text-white" /></div>
                 <div>
-                  <p className="text-[11px] font-bold text-white/50 mb-1">You (speaking...)</p>
-                  <div className="bg-blue-600/40 border border-blue-400/30 rounded-2xl px-5 py-3 max-w-xs md:max-w-sm text-sm text-white/80 italic">{currentTranscript}</div>
+                  <p className="text-[10px] font-bold text-white/50 mb-1">You (speaking...)</p>
+                  <div className="bg-blue-600/40 border border-blue-400/30 rounded-2xl px-5 py-3 max-w-xs md:max-w-sm text-xs text-white/80 italic">{currentTranscript}</div>
                 </div>
               </motion.div>
             )}
           </div>
+
+          {/* Failed Turns Retry Box */}
+          {failedTurnsState && (
+            <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 mt-3 text-center shrink-0">
+              <p className="text-rose-400 text-xs font-bold mb-2">Failed to get response from AI. Check connection and retry.</p>
+              <button
+                onClick={retryAIResponse}
+                disabled={isRetryingResponse}
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-6 py-2 rounded-xl text-xs transition-colors"
+              >
+                {isRetryingResponse ? 'Retrying...' : 'Retry Sending Answer'}
+              </button>
+            </div>
+          )}
+
+          {/* Listening State Action Banner */}
+          {isListening && !useTextFallback && (
+            <div className="flex justify-between items-center mt-3 pt-3 border-t border-white/5 shrink-0">
+              <span className="text-[10px] text-emerald-400 font-bold animate-pulse flex items-center gap-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                Speech capturing active
+              </span>
+              <button
+                onClick={() => {
+                  if (transcriptBuildRef.current.trim().length > 0) {
+                    recognitionRef.current?.stop();
+                  } else {
+                    toast.error("Nothing transcribed yet. Speak or switch to Text Mode in settings.");
+                  }
+                }}
+                className="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-black px-6 py-2 rounded-xl text-xs transition-colors shadow-lg shadow-cyan-500/25"
+              >
+                Submit Answer Now
+              </button>
+            </div>
+          )}
+
+          {/* Text input fallback box */}
+          {useTextFallback && isListening && (
+            <div className="bg-slate-900/60 border border-white/10 rounded-3xl p-5 mt-4 space-y-3 shrink-0">
+              <p className="text-white/60 text-xs font-bold uppercase tracking-wider">Type your response below</p>
+              <textarea
+                className="w-full h-24 p-4 bg-slate-950 border border-white/10 rounded-2xl text-white text-xs outline-none resize-none focus:border-cyan-500 transition-colors"
+                placeholder="Type your answer here..."
+                value={textAnswer}
+                onChange={e => setTextAnswer(e.target.value)}
+              />
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] text-cyan-400 font-bold">Text Fallback Mode</span>
+                <button
+                  onClick={() => {
+                    if (textAnswer.trim().length > 0) {
+                      submitAnswer(textAnswer.trim());
+                    } else {
+                      toast.error("Please enter a response before submitting.");
+                    }
+                  }}
+                  className="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-black px-6 py-2 rounded-xl text-xs transition-colors shadow-lg shadow-cyan-500/20"
+                >
+                  Submit Response
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right: webcam */}
-        <div className="w-80 xl:w-96 shrink-0 flex flex-col gap-4">
-          <div className="flex-1 rounded-3xl overflow-hidden border border-white/10 bg-black relative">
+        <div className="w-full md:w-80 xl:w-96 shrink-0 flex flex-col gap-4">
+          <div className="flex-1 rounded-[2.5rem] overflow-hidden border border-white/10 bg-black relative min-h-[220px]">
             <video ref={videoRef} autoPlay muted playsInline className={`w-full h-full object-cover ${!isVideoOn ? 'hidden' : ''}`} />
             {(!isVideoOn || camError) && (
               <div className="w-full h-full flex items-center justify-center bg-gray-900 absolute inset-0">
@@ -612,8 +919,8 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
       </div>
 
       {/* Bottom: waveform + controls */}
-      <div className="relative z-10 px-8 pb-6">
-        <AudioWaveform mode={isAiSpeaking ? 'ai' : isListening ? 'user' : 'standby'} stream={streamRef.current} />
+      <div className="relative z-10 px-8 pb-6 bg-[#0a0f1e]/80 border-t border-white/5">
+        <AudioWaveform mode={isAiSpeaking ? 'ai' : isListening ? 'user' : 'standby'} stream={streamRef.current} onVolumeUpdate={handleVolumeUpdate} />
         <div className="flex items-center justify-center gap-4 mt-4">
           <button onClick={toggleMic} className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isMuted ? 'bg-rose-600/80 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
             {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
