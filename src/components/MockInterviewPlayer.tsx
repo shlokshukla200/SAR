@@ -195,8 +195,20 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
   const interviewEndedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   
-  const questionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastActiveTimeRef = useRef<number>(Date.now());
+  const handleVolumeUpdate = useCallback((rms: number) => {
+    const noiseFloor = 0.015;
+    if (rms > noiseFloor) {
+      lastActiveTimeRef.current = Date.now();
+    } else {
+      const silenceDuration = Date.now() - lastActiveTimeRef.current;
+      if (silenceDuration > silenceTimeoutSetting * 1000) {
+        if (isListening && !useTextFallback && transcriptBuildRef.current.trim().length > 0) {
+          console.log("RMS silence threshold met, stopping recognition");
+          recognitionRef.current?.stop();
+        }
+      }
+    }
+  }, [isListening, silenceTimeoutSetting, useTextFallback]);
 
   useEffect(() => { turnsRef.current = turns; }, [turns]);
   useEffect(() => { interviewEndedRef.current = interviewEnded; }, [interviewEnded]);
@@ -664,21 +676,6 @@ export default function MockInterviewPlayer({ task, student, onBack }: MockInter
     );
   }
 
-  // Main interview UI
-  const handleVolumeUpdate = useCallback((rms: number) => {
-    const noiseFloor = 0.015;
-    if (rms > noiseFloor) {
-      lastActiveTimeRef.current = Date.now();
-    } else {
-      const silenceDuration = Date.now() - lastActiveTimeRef.current;
-      if (silenceDuration > silenceTimeoutSetting * 1000) {
-        if (isListening && !useTextFallback && transcriptBuildRef.current.trim().length > 0) {
-          console.log("RMS silence threshold met, stopping recognition");
-          recognitionRef.current?.stop();
-        }
-      }
-    }
-  }, [isListening, silenceTimeoutSetting, useTextFallback]);
 
   if (resumePrompt) {
     return (
